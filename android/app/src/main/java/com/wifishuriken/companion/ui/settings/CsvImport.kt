@@ -21,10 +21,13 @@ suspend fun importCsvFiles(context: Context, uris: List<Uri>, onProgress: (Int, 
   val outcomes = uris.mapIndexed { i, uri ->
     withContext(Dispatchers.Main) { onProgress(i + 1, uris.size) }
     val name = displayName(context, uri)
-    runCatching {
-      val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("cannot open")
-      importer.import(name, bytes)
-    }.getOrElse { ImportOutcome.NotShurikenCsv(name) }
+    try {
+      context.contentResolver.openInputStream(uri)?.use { importer.importStream(name, it) } ?: ImportOutcome.NotShurikenCsv(name)
+    } catch (e: kotlinx.coroutines.CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      ImportOutcome.NotShurikenCsv(name)
+    }
   }
   summarize(outcomes)
 }
@@ -44,6 +47,7 @@ fun summarize(outcomes: List<ImportOutcome>): String {
     outcomes.count { it is ImportOutcome.NotShurikenCsv }.takeIf { it > 0 }?.let { "$it not Shuriken CSV" },
     outcomes.count { it is ImportOutcome.NoRows }.takeIf { it > 0 }?.let { "$it without rows" },
     outcomes.count { it is ImportOutcome.TooLarge }.takeIf { it > 0 }?.let { "$it too large" },
+    outcomes.count { it is ImportOutcome.ImportFailed }.takeIf { it > 0 }?.let { "$it could not be read (retried next session)" },
   )
   return parts.joinToString(", ") + "."
 }

@@ -91,4 +91,10 @@ class ManualImporterTest {
     assertEquals(ImportOutcome.Imported("shuriken_20260101120005_90.csv", 2, 0), r)
     assertEquals(ImportOutcome.NoRows("empty.csv"), import("empty.csv", HEAD))
   }
+
+  @Test
+  fun filesOverTheSizeLimitAreRefused() = runBlocking {
+    val small = ManualImporter(store, Ingestor(db, null), db, maxBytes = 100)
+    assertEquals(ImportOutcome.TooLarge("big.csv"), small.import("big.csv", (HEAD + row(1) + row(2)).toByteArray()))
+  }
 }

@@ -11,6 +11,10 @@ on:
       - ".github/workflows/android-companion.yml"
   workflow_dispatch:
 
+# Build and test only: the job needs to read the repository and nothing else.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest

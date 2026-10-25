@@ -12,6 +12,7 @@ import com.wifishuriken.companion.core.WigleCsv
 import com.wifishuriken.companion.core.WigleRecord
 import com.wifishuriken.companion.core.classifySecurity
 import com.wifishuriken.companion.core.estimatePosition
+import java.io.InputStream
 
 data class IngestResult(val rowsInserted: Int, val rejected: Int, val macsTouched: Set<String>)
 
@@ -24,12 +25,49 @@ class Ingestor(private val db: CompanionDb, private val oui: OuiTable?) {
   private val dao = db.dao()
 
   /** Imports a whole log file; a final line without a newline (power lost mid-write) is not imported. */
-  suspend fun ingestFile(logName: String, bytes: ByteArray): IngestResult =
-    ingestRecords(logName, CsvRecordSplitter().feed(bytes))
+  suspend fun ingestFile(logName: String, bytes: ByteArray): IngestResult = ingestStream(logName, bytes.inputStream())
+
+  /**
+   * Imports a log from [input] in chunks of [chunkBytes]: one transaction per chunk for the rows, then
+   * one for the network and trip aggregates, so a long log never has to fit in memory at once.
+   */
+  suspend fun ingestStream(logName: String, input: InputStream, chunkBytes: Int = DEFAULT_CHUNK_BYTES): IngestResult {
+    val splitter = CsvRecordSplitter()
+    val buf = ByteArray(chunkBytes)
+    var inserted = 0
+    var rejected = 0
+    val touched = HashSet<String>()
+    while (true) {
+      val n = input.read(buf)
+      if (n < 0) break
+      if (n == 0) continue
+      val records = splitter.feed(buf, 0, n)
+      if (records.isEmpty()) continue
+      db.withTransaction {
+        val r = insertRecords(ensureTrip(logName), records)
+        inserted += r.rowsInserted
+        rejected += r.rejected
+        touched += r.macsTouched
+      }
+    }
+    db.withTransaction {
+      val tripId = ensureTrip(logName)
+      (recomputeNetworksInternal(touched) + tripId).forEach { recomputeTrip(it) }
+    }
+    return IngestResult(inserted, rejected, touched)
+  }
 
   /** Imports complete records of [logName] (the live path, fed by the log tailer). */
   suspend fun ingestRecords(logName: String, records: List<CsvRecord>): IngestResult = db.withTransaction {
     val tripId = ensureTrip(logName)
+    val r = insertRecords(tripId, records)
+    val affectedTrips = recomputeNetworksInternal(r.macsTouched) + tripId
+    affectedTrips.forEach { recomputeTrip(it) }
+    r
+  }
+
+  /** Inserts the sightings and rejected rows of [records]; the caller recomputes aggregates. */
+  private suspend fun insertRecords(tripId: Long, records: List<CsvRecord>): IngestResult {
     var inserted = 0
     var rejected = 0
     val touched = HashSet<String>()
@@ -67,9 +105,7 @@ class Ingestor(private val db: CompanionDb, private val oui: OuiTable?) {
         else -> Unit // pre-header, column header, unrecognized lines
       }
     }
-    val affectedTrips = recomputeNetworksInternal(touched) + tripId
-    affectedTrips.forEach { recomputeTrip(it) }
-    IngestResult(inserted, rejected, touched)
+    return IngestResult(inserted, rejected, touched)
   }
 
   /** Recomputes aggregates and position estimates for [macs] (all networks when null). */
@@ -147,6 +183,8 @@ class Ingestor(private val db: CompanionDb, private val oui: OuiTable?) {
   }
 
   companion object {
+    const val DEFAULT_CHUNK_BYTES = 256 * 1024
+
     /** `shuriken_20260101120000.csv` -> `2026-01-01 12:00:00` (the firmware names logs from GNSS UTC). */
     fun startUtcOf(logName: String): String {
       val ts = ShurikenLogName.parse(logName)?.timestamp ?: return "1970-01-01 00:00:00"
