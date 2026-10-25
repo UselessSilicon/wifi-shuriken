@@ -1,3 +1,4 @@
+import java.net.URI
 import com.android.build.api.artifact.SingleArtifact
 
 plugins {
@@ -77,6 +78,62 @@ abstract class VerifyNoNetworkPermission : DefaultTask() {
   }
 }
 
+// Vendor names ship inside the app (no lookups at run time): the IEEE MA-L registry is downloaded at
+// build time (cached under build/oui) and reduced to "AABBCC<TAB>Vendor" lines.
+abstract class GenerateOuiAsset : DefaultTask() {
+  @get:Internal
+  abstract val cacheFile: RegularFileProperty
+
+  @get:OutputDirectory
+  abstract val outputDir: DirectoryProperty
+
+  @TaskAction
+  fun generate() {
+    val cache = cacheFile.get().asFile
+    if (!cache.exists() || cache.length() == 0L) {
+      try {
+        cache.parentFile.mkdirs()
+        val conn = URI("https://standards-oui.ieee.org/oui/oui.csv").toURL().openConnection()
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) ShurikenCompanionBuild")
+        conn.connectTimeout = 30_000
+        conn.readTimeout = 120_000
+        val tmp = File(cache.path + ".part")
+        conn.getInputStream().use { input -> tmp.outputStream().use { input.copyTo(it) } }
+        tmp.renameTo(cache)
+      } catch (e: Exception) {
+        logger.warn("OUI registry download failed (${e.message}); vendor names will be empty")
+      }
+    }
+    val out = outputDir.get().asFile.resolve("oui")
+    out.mkdirs()
+    val lines = if (cache.exists()) cache.readLines().drop(1).mapNotNull(::toAssetLine) else emptyList()
+    out.resolve("oui.tsv").writeText(lines.joinToString("\n", postfix = if (lines.isEmpty()) "" else "\n"))
+  }
+
+  private fun toAssetLine(csvLine: String): String? {
+    val fields = ArrayList<String>()
+    val cur = StringBuilder()
+    var quoted = false
+    for (c in csvLine) {
+      when {
+        c == '"' -> quoted = !quoted
+        c == ',' && !quoted -> { fields.add(cur.toString()); cur.setLength(0) }
+        else -> cur.append(c)
+      }
+    }
+    fields.add(cur.toString())
+    if (fields.size < 3 || fields[0] != "MA-L") return null
+    val prefix = fields[1].trim().uppercase()
+    val name = fields[2].replace('\t', ' ').trim()
+    return if (prefix.length == 6 && name.isNotEmpty()) "$prefix\t$name" else null
+  }
+}
+
+val generateOuiAsset = tasks.register<GenerateOuiAsset>("generateOuiAsset") {
+  cacheFile.set(layout.buildDirectory.file("oui/oui.csv"))
+  outputDir.set(layout.buildDirectory.dir("generated/ouiAssets"))
+}
+
 val verifyAll = tasks.register("verifyNoNetworkPermission")
 
 androidComponents {
@@ -86,6 +143,7 @@ androidComponents {
       mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
     }
     verifyAll.configure { dependsOn(perVariant) }
+    variant.sources.assets?.addGeneratedSourceDirectory(generateOuiAsset, GenerateOuiAsset::outputDir)
   }
 }
 
