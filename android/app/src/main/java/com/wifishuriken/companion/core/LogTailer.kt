@@ -147,9 +147,10 @@ class LogTailer(
   }
 
   companion object {
-    // The controller holds its SD lock for the whole GetPartialObject transfer,
-    // which pauses CSV writes, so reads are kept short. Its MTP endpoint buffer
-    // is 16 KiB (CFG_TUD_MTP_EP_BUFSIZE).
+    // The controller takes its SD lock per transfer chunk, so CSV writes
+    // continue during a read; requests are still kept short so each poll
+    // stays responsive. Its MTP endpoint buffer is 16 KiB
+    // (CFG_TUD_MTP_EP_BUFSIZE).
     const val DEFAULT_CHUNK_BYTES = 16 * 1024
     const val DEFAULT_MAX_BYTES_PER_POLL = 256L * 1024
   }
