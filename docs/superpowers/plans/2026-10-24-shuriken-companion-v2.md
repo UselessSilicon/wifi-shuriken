@@ -1,5 +1,10 @@
 # Shuriken Companion v2 Implementation Plan
 
+> **Disclaimer:** Written entirely by an AI (Claude, by Anthropic), not by the repository owner, who did not
+> write or design it. Unofficial: not associated with or endorsed by the WiFi-Shuriken project; a personal
+> one-off.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Turn the `android/` prototype into a fully offline wardriving companion: live follow-me map with trip counters, phone GPS fed to the Shuriken, an on-phone log archive and database, and browse/sort/filter screens.
@@ -263,7 +268,7 @@ Build environment for every command below: `source ~/.local/bin/android-env.sh &
 - [ ] **Step 3:** Implement `Settings`, `ArchiveStore`, `ArchiveSyncer`, `ActiveLogTracker`; run the tests. Expected: PASS.
 - [ ] **Step 4:** Read the Android 17 (API 37) behaviour-changes notes for foreground services, USB and location (offline SDK docs if present; otherwise note the gap for the owner); then implement the service, repository, manifest entries (USB attach filter kept) and `MainActivity` wiring.
 - [ ] **Step 5:** Run `./gradlew test :app:verifyNoNetworkPermission assembleDebug`. Expected: BUILD SUCCESSFUL.
-- [ ] **Step 6:** Hardware check (owner present): finished logs archived once (second connection fetches nothing); on plug-in the previous log is not shown as live and the new log takes over once it grows; counters move; "Phone GPS ✓" while feeding; rows gain positions before the module's fix (cold start near a window); screen-off recording continues; unplug stops the service.
+- [ ] **Step 6:** Hardware check (owner present): finished logs archived once (second connection fetches nothing); on plug-in the previous log is not shown as live and the new log takes over once it grows; counters move; "Phone GPS on" while feeding; rows gain positions before the module's fix (cold start near a window); screen-off recording continues; unplug stops the service.
 - [ ] **Step 7:** Commit `feat(app): live session service with archive sync, tail, track and phone GPS feed`.
 
 ### Task 11: Offline map component (`:app`)
@@ -291,8 +296,8 @@ Build environment for every command below: `source ~/.local/bin/android-env.sh &
 **Interfaces:**
 - Consumes: `LiveSessionRepository.state`, `OfflineMap`, `CounterSnapshot`.
 - Produces: `@Composable fun LiveScreen(state: LiveState, map: @Composable (Modifier) -> Unit, onToggleHeading: () -> Unit, onRecentre: () -> Unit)` — stateless, with the map passed in as a slot so tests never create a MapLibre `MapView` (its native library can't load under Robolectric); `@Composable fun CompanionApp()` with bottom navigation `Live · Drives · Networks · Settings`; `CompanionTheme` (Material 3; light/dark from system; fixed brand palette matching spec §6 security colours).
-- Live layout per spec §6.1 (B1): map ~55% with chips (Shuriken fix from `moduleFix`, "Phone GPS ✓" when feeding, phone battery), heading/north toggle and recentre; below, a 3×2 grid of tiles (2.4 GHz, 5 GHz, With GPS, No GPS, New, Seen before), networks-per-minute graph, trip strip (elapsed, distance, speed, open count).
-- [ ] **Step 1:** Write a Compose test (Robolectric) `liveScreenShowsSixCounters`: `LiveScreen` with a fixed `LiveState` and an empty map slot shows the six labels and values, the "Phone GPS ✓" chip when `feeding`, and no text containing "alert" or "warning".
+- Live layout per spec §6.1 (B1): map ~55% with chips (Shuriken fix from `moduleFix`, "Phone GPS on" when feeding, phone battery), heading/north toggle and recentre; below, a 3×2 grid of tiles (2.4 GHz, 5 GHz, With GPS, No GPS, New, Seen before), networks-per-minute graph, trip strip (elapsed, distance, speed, open count).
+- [ ] **Step 1:** Write a Compose test (Robolectric) `liveScreenShowsSixCounters`: `LiveScreen` with a fixed `LiveState` and an empty map slot shows the six labels and values, the "Phone GPS on" chip when `feeding`, and no text containing "alert" or "warning".
 - [ ] **Step 2:** Run it. Expected: FAIL. Implement. Run `./gradlew test`. Expected: PASS.
 - [ ] **Step 3:** Run `./gradlew assembleDebug`. Expected: BUILD SUCCESSFUL.
 - [ ] **Step 4:** Commit `feat(app): Compose shell, theme and Live screen (B1)`.
