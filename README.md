@@ -1,5 +1,14 @@
 # WiFi-Shuriken
 
+> **Fork note:** This is an unofficial personal fork, not associated with or endorsed by the WiFi-Shuriken
+> project. The Android companion app in `android/` and the documents in `docs/superpowers/` were written
+> entirely by an AI (Claude, by Anthropic), not by the fork owner, who did not write or design them. The
+> firmware and the rest of this README are the upstream project's work.
+>
+> The companion app (live map, phone GPS feed, log archive, drive and network browsing; fully offline,
+> no network permission) is described in [`android/README.md`](android/README.md).
+
+
 WiFi-Shuriken is a distributed WiFi scanning and logging system built around two roles, controller and scanner. An RP2350-based controller manages the overall system, while one or more ESP32-C5 scanner nodes perform channel-specific WiFi scans and report results back to the controller.
 
 The controller handles functions such as USB serial, GNSS, SD logging, and scan scheduling. It talks to the scanner nodes over SPI, with optional shift-register based chip select fanout for multiple scanners. The controller firmware splits work across cores so scanner scheduling and transport can run independently from logging and GNSS processing.

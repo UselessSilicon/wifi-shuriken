@@ -1,18 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Shuriken Companion</string>
-    <string name="connect">Connect</string>
-    <string name="status_no_device">No Shuriken connected</string>
-    <string name="status_permission">Waiting for USB permission: %1$s</string>
-    <string name="status_connecting">Connecting to %1$s…</string>
-    <string name="status_connected">Connected: %1$s</string>
-    <string name="status_error">Connection error</string>
-    <string name="file_line">%1$s · %2$s · polled %3$ds ago%4$s</string>
-    <string name="file_catching_up">" · loading %1$d%%"</string>
-    <string name="stats_counts">APs %1$d  rows %2$d  open %3$d</string>
-    <string name="stats_bands">2.4G %1$d  5G %2$d  no-GPS rows %3$d</string>
-    <string name="stats_position">Last fix %1$s @ %2$s UTC</string>
-    <string name="hidden_ssid">(hidden)</string>
-    <string name="rssi">%1$d dBm</string>
-    <string name="ap_detail">%1$s ch%2$d %3$s\n%4$s ×%5$d best %6$d dBm</string>
 </resources>
