@@ -18,10 +18,12 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
+import com.wifishuriken.companion.Diag
 import com.wifishuriken.companion.R
 import com.wifishuriken.companion.core.CardFile
 import com.wifishuriken.companion.core.CsvRecord
 import com.wifishuriken.companion.core.LogTailer
+import com.wifishuriken.companion.core.Nmea
 import com.wifishuriken.companion.core.OuiTable
 import com.wifishuriken.companion.core.PollOutcome
 import com.wifishuriken.companion.core.SecurityClass
@@ -36,6 +38,7 @@ import com.wifishuriken.companion.data.NetworkFilter
 import com.wifishuriken.companion.data.NetworkSort
 import com.wifishuriken.companion.data.Settings
 import com.wifishuriken.companion.data.TrackPointEntity
+import com.wifishuriken.companion.data.loadOuiTable
 import com.wifishuriken.companion.map.MapNetwork
 import com.wifishuriken.companion.usb.MtpCardSource
 import com.wifishuriken.companion.usb.MtpStalledException
@@ -146,9 +149,19 @@ class LiveSessionService : Service() {
     if (!settings.feedPhoneGps) return
     val port = conn?.nmea ?: return
     sendExecutor.execute {
-      if (port.send(sentence)) lastFeedOkMs = System.currentTimeMillis()
+      if (!Nmea.isForwardable(sentence)) return@execute // only GGA/RMC go to the Shuriken
+      val ok = port.send(sentence)
+      if (ok) {
+        if (lastFeedOkMs == 0L) Diag.i("NMEA feed: first sentence written")
+        lastFeedOkMs = System.currentTimeMillis()
+      } else {
+        nmeaFailed++
+        if (nmeaFailed <= 3 || nmeaFailed % 100 == 0) Diag.w("NMEA feed: write failed (result ${port.lastWriteResult}, failures $nmeaFailed)")
+      }
     }
   }
+
+  @Volatile private var nmeaFailed = 0
 
   private suspend fun runSession(device: UsbDevice) {
     val db = CompanionDb.get(this)
@@ -161,18 +174,22 @@ class LiveSessionService : Service() {
       try {
         ShurikenConnection.open(this, device).use { c ->
           conn = c
+          Diag.i("session: connected, nmeaPort=${c.nmea != null}")
           LiveSessionRepository.update { it.copy(connected = true, message = null, syncProgress = "Checking archive") }
           syncer.reingestOrphans()
           val source = MtpCardSource(c)
           val report = syncer.syncOnce(source, activeLog = null)
+          Diag.i("session: archive sync archived=${report.archived} failed=${report.failed}")
           LiveSessionRepository.update {
             it.copy(syncProgress = "Imported ${report.archived} new log(s)" + if (report.failed > 0) ", ${report.failed} to retry" else "")
           }
           c.nmea?.start { line -> parseModuleFix(line)?.let { f -> LiveSessionRepository.update { it.copy(moduleFix = f) } } }
           tail(source, ingestor, syncer, db)
         }
+        Diag.i("session: ended normally")
         break
       } catch (e: MtpStalledException) {
+        Diag.w("session: MTP stalled", e)
         if (reopened) {
           LiveSessionRepository.update { it.copy(connected = false, message = "The Shuriken stopped answering; unplug and replug") }
           break
@@ -182,6 +199,7 @@ class LiveSessionService : Service() {
       } catch (e: CancellationException) {
         throw e
       } catch (e: Exception) {
+        Diag.w("session: failed", e)
         LiveSessionRepository.update { it.copy(connected = false, message = "USB error: ${e.message}") }
         break
       } finally {
@@ -237,7 +255,7 @@ class LiveSessionService : Service() {
           .filter { it.estLat != null && it.estLon != null }
           .map { MapNetwork(it.mac, it.estLat!!, it.estLon!!, SecurityClass.valueOf(it.security), it.firstTripId == id) }
         LiveSessionRepository.update {
-          it.copy(networks = networks, phoneBatteryPct = location?.batteryPercent(), feeding = now - lastFeedOkMs < FEED_FRESH_MS)
+          it.copy(networks = networks, phoneBatteryPct = location?.batteryPercent(), feeding = now - lastFeedOkMs < FEED_FRESH_MS, feedEnabled = settings.feedPhoneGps)
         }
       }
       val catchingUp = outcome is PollOutcome.Tailing && !outcome.caughtUp
@@ -250,9 +268,7 @@ class LiveSessionService : Service() {
     if (points.isNotEmpty()) db.dao().insertTrackPoints(points.map { TrackPointEntity(tripId = tripId, tMs = it.tMs, lat = it.lat, lon = it.lon) })
   }
 
-  private fun loadOui(): OuiTable? = runCatching {
-    assets.open("oui/oui.tsv").bufferedReader().useLines { lines -> OuiTable(lines) }
-  }.getOrNull()
+  private fun loadOui(): OuiTable? = loadOuiTable(this)
 
   companion object {
     const val EXTRA_DEVICE = "device"

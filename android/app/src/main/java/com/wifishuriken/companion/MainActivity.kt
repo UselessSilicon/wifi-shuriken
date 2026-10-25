@@ -117,6 +117,10 @@ class MainActivity : ComponentActivity() {
     if (LiveSessionRepository.state.value.connected) return
     val device = ShurikenUsb.findDevice(usbManager) ?: run {
       note("Plug in the Shuriken (USB OTG)")
+      // Live shows the phone's own position before the Shuriken is plugged in.
+      if (!hasFineLocation()) {
+        runtimePermissions.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+      }
       return
     }
     connectWithPermission(device)

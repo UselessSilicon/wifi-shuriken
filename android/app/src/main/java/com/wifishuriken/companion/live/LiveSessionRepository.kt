@@ -18,6 +18,8 @@ data class LiveState(
   val counters: CounterSnapshot = EMPTY_COUNTERS,
   val moduleFix: ModuleFix? = null,
   val feeding: Boolean = false,
+  /** The owner's "feed phone GPS" setting, so the UI can say why nothing is fed yet. */
+  val feedEnabled: Boolean = false,
   val phoneBatteryPct: Int? = null,
   val userLocation: TrackPoint? = null,
   val bearingDeg: Float? = null,

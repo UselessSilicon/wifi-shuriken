@@ -15,13 +15,24 @@ commit fixes MTP (see Hardware notes).
 - **Live:** a map that follows you overhead, with your track and network dots coloured
   by security class. Counters show 2.4 GHz, 5 GHz, with GPS, no GPS, new (never seen
   before) and seen before. It also shows networks per minute and a trip summary. It
-  shows no alerts or warnings.
+  shows no alerts or warnings. Before the Shuriken is plugged in, the map already
+  follows the phone's own GPS, and a chip says whether the phone has a fix.
 - **Phone GPS feed:** the phone sends its own GGA/RMC sentences to the Shuriken's NMEA
   port about once a second. The firmware uses them only when its own GNSS module has
-  no fix. You can turn this off in Settings.
+  no fix. The phone produces these sentences only once it has a fix of its own, so Live
+  shows "Phone GPS: waiting for fix" until then and "Phone GPS on" while feeding. The
+  Shuriken's LED reflects only its own GNSS module, so it can stay amber while the phone
+  feed is in use. You can turn the feed off in Settings.
 - **Archive:** every `shuriken_*.csv` on the SD card is copied into app storage and
   imported once. Files are matched by name and size, then MD5. The log being written
   is tailed live, record by record.
+- **Import logs:** Settings > Import logs > Choose CSV files adds Shuriken CSV logs kept
+  elsewhere (older logs, copies on a computer). File names may carry a prefix
+  (`<anything>shuriken_YYYYMMDDHHMMSS.csv`); files without a log name are named from
+  their first row. Files already imported (same MD5, or an older partial copy) are
+  skipped, a longer copy of an existing log adds only its new rows, and a file with the
+  same name but different content is skipped. Only the Shuriken's 11-column WiGLE 1.4
+  layout is accepted; WiGLE app exports and KML are refused.
 - **Drives:** a list of drives with distance, duration, sightings, unique networks,
   new networks, percentage with GPS and mode (drive, walk or bike: inferred, or set by
   hand). Filter by mode and date. You can show every drive on one map.
@@ -33,8 +44,8 @@ commit fixes MTP (see Hardware notes).
 - **Network detail:** a map of every sighting with the estimated position and its
   uncertainty circle. Shows security and the raw AuthMode, channels, vendor (IEEE OUI),
   first and last seen, strongest signal, number of drives and the full sighting history.
-- **Settings:** the offline map file, database export (system file picker), phone GPS
-  feed, units, and an About section.
+- **Settings:** the offline map file, log import, database export (system file picker),
+  phone GPS feed, units, and an About section.
 
 ## Privacy
 
@@ -45,7 +56,14 @@ commit fixes MTP (see Hardware notes).
   in Settings. The app copies it into its own storage. Map fonts and sprites are
   bundled in the APK at build time.
 - Scan data, the archive and the database stay on the phone. The only way out is the
-  database export, which you start yourself through the system file picker.
+  database export, which you start yourself through the system file picker. Backup and
+  device-to-device transfer are disabled for all app data (`allowBackup="false"` plus
+  data extraction rules that exclude everything).
+- Diagnostics are minimal: the app logs session steps and errors to logcat under the tag
+  `ShurikenDiag` (connected, sync counts, failures, first GPS sentence written). It never
+  logs positions, MAC addresses or network names.
+- The APK built here is a debug build. With USB debugging on, a debug build's data can be
+  read over adb; turn USB/wireless debugging off when not developing.
 
 ## Getting a map file
 
@@ -103,5 +121,6 @@ The **Android Companion** CI workflow builds `app-debug.apk`.
 
 - On some phones the system MTP handler claims the device first. If the app cannot
   open it, unplug, plug back in, and choose this app when asked.
-- The hardware path (MTP, NMEA feed) is covered by unit tests and a debug-build USB
-  self-test, but has had limited testing on real devices.
+- Tested on a Samsung Galaxy S23 (Android 17) on 2026-10-25: connection, archive sync,
+  live tailing and the phone GPS feed work. Longer drives and walks are still being
+  tested.

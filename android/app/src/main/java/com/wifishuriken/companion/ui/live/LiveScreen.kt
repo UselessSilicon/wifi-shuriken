@@ -51,8 +51,14 @@ fun LiveScreen(
           fix.fix -> StatusChip("GPS ${fix.satellites ?: 0}", Accents.Gps)
           else -> StatusChip("No fix", Accents.NoGps)
         }
-        if (state.feeding) StatusChip("Phone GPS on", Accents.Gps)
+        val phoneFix = state.userLocation?.let { nowMs - it.tMs < PHONE_FIX_FRESH_MS } == true
+        phoneGpsStatus(state.connected, state.feeding, state.feedEnabled, phoneFix)?.let {
+          StatusChip(it, if (state.feeding || (!state.connected && phoneFix)) Accents.Gps else Accents.NoGps)
+        }
         state.phoneBatteryPct?.let { StatusChip("Battery $it%") }
+      }
+      (state.message ?: state.syncProgress)?.let {
+        StatusChip(it, modifier = Modifier.align(Alignment.TopStart).padding(start = 10.dp, top = 56.dp))
       }
       Column(
         Modifier.align(Alignment.BottomEnd).padding(10.dp),
@@ -102,4 +108,18 @@ private fun StripItem(label: String, value: String) {
     Text(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     Text(label, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
   }
+}
+
+private const val PHONE_FIX_FRESH_MS = 10_000L
+
+/**
+ * The phone GPS chip: while connected, whether the phone is feeding the Shuriken (it needs its own
+ * fix first); while not connected, whether the phone has a fix.
+ */
+fun phoneGpsStatus(connected: Boolean, feeding: Boolean, feedEnabled: Boolean, phoneFix: Boolean): String? = when {
+  connected && feeding -> "Phone GPS on"
+  connected && feedEnabled -> "Phone GPS: waiting for fix"
+  connected -> null
+  phoneFix -> "Phone GPS: fix"
+  else -> "Phone GPS: no fix"
 }
