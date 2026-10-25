@@ -55,9 +55,10 @@ keeping all data private and on the device.
   at run time.
 - **Making the Shuriken misbehave.** Never send it anything except NMEA position
   sentences on its NMEA port (section 7). Never change a CDC port's line coding to
-  1200 baud (that reboots the RP2350 into its bootloader). Never leave a CDC port
-  "connected" (DTR asserted) without reading it: older firmware stalled and was
-  reset by its watchdog in exactly that case.
+  1200 baud (that reboots the RP2350 into its bootloader). **Never assert DTR on any
+  CDC port** and never open the Console port: a host that looked "connected" but did
+  not read Console made older firmware stall until its watchdog reset it. The NMEA
+  port needs no DTR (see section 5).
 - **Losing or double-counting data.** A drive tailed live and later imported as
   a finished file must count once.
 
@@ -65,36 +66,71 @@ keeping all data private and on the device.
 
 - **Target device:** Samsung Galaxy S23 (USB host/OTG supported). Other phones
   are not a goal.
+- **Power (owner's answer):** on most trips the **phone powers the Shuriken** over
+  USB, plugged in at the start, so the Shuriken boots when it is plugged in. Some
+  sessions run **independently of the phone** (own power, no phone). Consequences:
+  - Plug-in is the normal start: Android opens the app for the attached device
+    (the prototype's USB-attach filter), the app starts the live session and its
+    foreground service from that activity, and the GPS feed covers the Shuriken's
+    whole start-up window.
+  - Independent sessions are picked up later by the archive/import step; their
+    track and distance come from the log's own positions.
+  - Plugging the phone into a Shuriken that is already running works too: Live
+    catches up on the current log.
+  - The phone's battery also powers the Shuriken; show the phone's battery level in
+    the Live status chips (designer's call) so long walks or bike rides don't end
+    with a flat phone.
 - **Toolchain (owner asked for latest):** latest stable Kotlin, Android Gradle
   Plugin and Gradle; Jetpack Compose with Material 3; compile against the newest
   stable Android SDK (Android 17 / API 37 at time of writing); JDK 25 for builds.
   All existing code is updated to fit the new stack. minSdk is the builder's call,
   but no lower than what keeps the code simple (the owner only targets the S23).
 - **No `INTERNET` permission.** The app has no network access at all, which
-  guarantees nothing is uploaded and the map is truly offline.
-- **Firmware facts the app relies on** (controller firmware including upstream
-  commit `014ed54`, now installed):
-  - USB product string `WiFi Shuriken`, VID:PID `2886:0058`. Interfaces are
-    identified by their string descriptors `Console`, `MTP` and `NMEA` (interface
-    numbers changed between firmware versions, so don't hard-code numbers).
+  guarantees nothing is uploaded and the map is truly offline. MapLibre's library
+  manifest adds `INTERNET` and `ACCESS_NETWORK_STATE`: strip them in the app manifest
+  (`tools:node="remove"`), verify the **merged** manifest in the build (a test or
+  build check that fails if either appears), and put MapLibre into offline mode so it
+  never needs connectivity state. The map style is generated at build time.
+- **Firmware scope:** only the controller firmware now installed (including upstream
+  commit `014ed54`). Older firmware is not supported, so no version detection or
+  compatibility code.
+- **Firmware facts the app relies on:**
+  - USB product string `WiFi Shuriken`, VID:PID `2886:0058`. Each serial (CDC) port
+    is a pair of interfaces; its name (`Console` or `NMEA`) is on the **control**
+    interface, and the unnamed **data** interface follows it in the descriptor
+    grouping, so find the data interface through that pairing. The MTP interface
+    is named `MTP`. Don't hard-code interface numbers.
   - **MTP** storage is read-only: GetObjectHandles, GetObjectInfo, GetObject,
     GetPartialObject (32-bit). The active CSV is flushed before it is listed or
     read. The SD lock is released between transfer chunks, so logging continues
-    during reads. A transfer that stalls about 5 s is abandoned by the firmware.
+    during reads. Only files in the card root are listed.
+  - **MTP quirks to handle:** no MTP events, so the app polls; object handles are
+    directory positions plus one, not permanent IDs (re-resolve by name); the device
+    answers "busy" while the SD card is in use or another transfer is running, which
+    Android reports as a plain failure, so retry; a transfer stops at the file size
+    it had when it started; after a transfer stalls about 5 s the firmware abandons
+    it and stalls its endpoints, so the app may need to close and reopen MTP.
   - **Log files** are `shuriken_<YYYYMMDDHHMMSS>[_NN].csv` on the card root, one per
-    boot, named from the first GNSS time. The newest (timestamp, then suffix) is the
+    boot, named from the first valid GNSS time (which can be the phone's time when
+    the phone feed supplies it first). The newest (timestamp, then suffix) is the
     one being written. Each starts with a `WigleWifi-1.4,...` pre-header and the
     column header `MAC,SSID,AuthMode,FirstSeen,Channel,RSSI,CurrentLatitude,
     CurrentLongitude,AltitudeMeters,AccuracyMeters,Type`.
-  - `AccuracyMeters` is the GNSS HDOP multiplied by 5, not a true accuracy.
-  - The firmware deduplicates per boot and resets its dedupe table when it acquires
-    a fix, so one BSSID can appear several times in a log.
+  - `AccuracyMeters` is the active source's HDOP multiplied by 5, not a true
+    accuracy (blank if the source sent no HDOP).
+  - The firmware deduplicates per boot and resets its dedupe table when it first has
+    a usable fix **from either source** (the phone feed counts), so one BSSID can
+    appear several times in a log.
   - **NMEA port:** carries the GNSS module's own NMEA output (about 5 Hz) to the
-    host, and accepts NMEA (`RMC`/`GGA`) from the host. The firmware uses host
+    host and accepts NMEA (`RMC`/`GGA`) from the host. It needs **no DTR** in either
+    direction and never blocks: output is dropped when the host doesn't read, and
+    input is drained up to 256 bytes per firmware loop. The firmware uses host
     positions only while its own module has no usable fix (fewer than 3 satellites
-    or a stale position); its own GNSS always takes priority.
-  - **Console port:** human-readable status lines about every second (sweep
-    counters, GPS state). Read-only for the app.
+    or a stale position); its own GNSS always takes priority. While the phone is the
+    source, the firmware's clock (row times, and the log name if it's the first time
+    source) also comes from the phone.
+  - **Console port:** status lines every 5 s, written only while DTR is asserted.
+    **The app does not use it** (see section 4).
 - **Volume:** design for at least 1 million stored sightings and 100k networks
   without the UI slowing down.
 - **Map file format:** the owner's existing offline map is a PMTiles vector file
@@ -130,8 +166,9 @@ enterprise). New-this-trip networks get a violet ring.
 
 - Top ~55%: overhead map that follows the phone, with heading-up or north-up
   toggle and a recentre button. A blue line shows the trip so far. Status chips:
-  Shuriken GPS state (e.g. "GPS 9" green, "no fix" amber) and "Phone GPS ✓" while
-  feeding.
+  Shuriken GPS state (e.g. "GPS 9" green, "no fix" amber), taken from the module's
+  own NMEA on the NMEA port, and "Phone GPS ✓" meaning **the app is sending phone
+  positions** (the firmware only uses them while its module has no fix).
 - Bottom ~45%: six counter tiles for this trip (2.4 GHz, 5 GHz, With GPS, No GPS,
   New, Seen before), a live "networks per minute" graph, and a trip strip (elapsed
   time, distance, speed, open-network count).
@@ -174,18 +211,32 @@ picker), theme follows system, units. Nothing that uploads.
 
 ## 7. Phone GPS feed
 
-- During a live session the app claims the `NMEA` interface alongside MTP on the
-  same USB connection.
-- It forwards the phone's own NMEA (`GGA` and `RMC`, from the platform's NMEA
-  listener, about once a second) to the Shuriken.
-- It **continuously reads** the port (the firmware writes its module's NMEA there).
-  This keeps the firmware from blocking and gives the Live screen the module's
-  live fix and satellite count.
+- During a live session the app claims the `NMEA` data interface (section 5 explains
+  how to find it) on the same USB connection as MTP.
+- **USB sharing rule:** Android's MTP implementation uses the connection's
+  asynchronous request queue, so all NMEA traffic must use blocking `bulkTransfer`
+  on its own thread and never the async queue (otherwise completed transfers can be
+  picked up by the wrong side). If that proves unreliable on the S23, a second
+  `openDevice()` connection for NMEA is the fallback. Shutdown order: stop NMEA I/O
+  and release its interface first, then close MTP, then the connection.
+- It forwards the phone's own NMEA (`GGA` and `RMC`, so the firmware gets both a
+  position and an HDOP) from the platform's NMEA listener, about once a second.
+  The listener only delivers sentences while the app holds an active GPS location
+  request, which the live session does anyway for the map.
+- It reads the port for status only: the module's own NMEA gives the Shuriken's fix
+  and satellite count. DTR is never asserted (section 4).
+- Side effects (section 5): while the phone supplies the fix, row times come from
+  the phone clock, a log can start earlier (named from phone time), and the
+  firmware's dedupe reset fires on the phone fix.
+- The phone's **track is recorded whenever a live session runs**, even with the feed
+  switched off; the switch controls only sending to the Shuriken.
 - Expected benefit, from the owner's real drives: about 7 to 8% of rows on a drive
   currently have no position, almost all in the first 30 to 170 s after power-on
   before the module's first fix. Mid-drive dropouts are negligible. The feed covers
   that start-up window; it does not change precision once the module has a fix.
-- On disconnect or stop, release the interface cleanly (DTR not left asserted).
+- On disconnect or stop, release the interface cleanly (shutdown order above).
+- Rows positioned by the phone are not distinguished from rows positioned by the
+  Shuriken (the log can't tell them apart); no "positioned by" statistic.
 
 ## 8. Data
 
@@ -215,6 +266,12 @@ records. The database is never exported automatically.
   (next connection). Read-only: nothing on the card is changed. Only
   `shuriken_*.csv` logs are archived (designer's call; `RESETLOG.CSV` and firmware
   images are ignored).
+- **"New" is chronological and derived, not stored once:** a network is "new" on
+  the trip (by trip start time) where it was first sighted. Because older logs can
+  be imported after newer trips, recompute first-seen trips after each import
+  rather than freezing "new" at ingest time. The Live screen's "New" counter
+  means "not in the database before this trip", which is the same thing for the
+  latest trip.
 - **No double counting:** a log first tailed live and later seen as a finished file
   must end up counted once (e.g. by tracking per-file byte offsets, or by replacing
   that trip's rows with the finished file's). Builder's choice of mechanism.
@@ -223,10 +280,19 @@ records. The database is never exported automatically.
 
 The owner's private desktop pipeline uses these rules on the same logs; match them:
 
-- A row is rejected if its MAC is invalid (or all zeros), FirstSeen is unparseable,
-  channel is outside 0 to 196, RSSI is outside -150 to 0, or coordinates are
-  invalid. Rows with **empty** coordinates are kept as "no position".
-  Coordinates of exactly `0,0` count as no position.
+- A row is rejected if any of these fail:
+  - **MAC:** after trimming, upper-casing and turning `-` into `:` (a bare
+    12-hex-digit value gets colons), it must match `^[0-9A-F]{2}(:[0-9A-F]{2}){5}$`
+    and must not be `00:00:00:00:00:00`.
+  - **FirstSeen:** exactly `YYYY-MM-DD HH:MM:SS` (UTC), with a year from 2000 to 2079.
+  - **Channel** (if present): 0 to 196. **RSSI** (if present): -150 to 0.
+  - **Coordinates** (if both present): latitude -90 to 90, longitude -180 to 180,
+    and not `0,0` (both within 1e-6 of zero). A row with `0,0` is rejected.
+- Rows with **empty** coordinates are kept as "no position". SSID: NUL characters
+  are removed; an empty SSID means a hidden network.
+- Agreement with the desktop pipeline is the goal for these rules; there is no
+  shared reference dataset (it would contain personal data), so unit tests use
+  synthetic rows covering each rule.
 - A truncated final line (power lost mid-write) is dropped, not fatal.
 - Band: channels 1 to 14 are 2.4 GHz, 32 to 177 are 5 GHz.
 - Security class from AuthMode: contains `EAP` → enterprise; `[WPA2` and `[RSN`
@@ -257,9 +323,12 @@ rebuilt. No lookups at run time.
 
 ## 9. Map
 
-- MapLibre Native for Android, reading a local PMTiles vector file the owner copies
-  to the phone and selects in Settings (system file picker; the app keeps a
-  persistent read grant).
+- MapLibre Native for Android, reading a local PMTiles vector file. MapLibre can
+  open PMTiles from a file path or app assets but **not** from the `content://`
+  address the system file picker returns, so: the owner picks the file once in
+  Settings and the app **copies it into its own storage** (with progress, a free-space
+  check, and a "replace map" option), then opens that copy by path. The owner's
+  file is regional, about 1 GB, which fits comfortably on the S23.
 - Styles, fonts and sprites needed for the basemap ship inside the app, so nothing
   is fetched.
 - Without a map file the app still works: tracks and network dots are drawn on a
@@ -272,6 +341,13 @@ rebuilt. No lookups at run time.
 A live session runs in a foreground service (Android's ongoing notification) so
 tailing, recording and the GPS feed continue with the screen off. It stops when the
 Shuriken is unplugged or the owner ends it.
+
+- Declare the service types `connectedDevice` and `location`. The location type
+  requires fine-location permission to be granted, and the service must be started
+  while the app is in the foreground: start it from the activity that the USB
+  plug-in event opens (or the Connect button), never from a background receiver.
+- Check these rules against the Android 17 (API 37) behaviour-changes notes during
+  planning; the design was written from earlier Android versions' rules.
 
 ## 11. Quality
 
