@@ -1,6 +1,16 @@
 package com.wifishuriken.companion.ui
 
 import android.net.Uri
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.wifishuriken.companion.core.TrackPoint
+import com.wifishuriken.companion.live.PhoneLocation
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -103,10 +113,37 @@ fun CompanionApp(mapStore: MapFileStore, onConnect: () -> Unit, onStop: () -> Un
 
 @Composable
 private fun LiveRoute(mapFile: File?, onConnect: () -> Unit, onStop: () -> Unit) {
-  val state by LiveSessionRepository.state.collectAsStateWithLifecycle()
+  val session by LiveSessionRepository.state.collectAsStateWithLifecycle()
   var headingUp by remember { mutableStateOf(false) }
   val dark = isSystemInDarkTheme()
+  val context = LocalContext.current
+  // Re-checked on resume so the position appears right after the permission is granted.
+  val resumed by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
+  val canLocate = remember(resumed) {
+    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+  }
+  // Without a session the screen reads the phone's GPS itself (only while visible); during a
+  // session the service does, for the track and the feed to the Shuriken.
+  var phone by remember { mutableStateOf<TrackPoint?>(null) }
+  var phoneBearing by remember { mutableStateOf<Float?>(null) }
+  DisposableEffect(session.connected, canLocate) {
+    if (session.connected || !canLocate) return@DisposableEffect onDispose {}
+    val location = PhoneLocation(context)
+    location.start(onLocation = { l ->
+      phone = TrackPoint(l.time, l.latitude, l.longitude)
+      if (l.hasBearing()) phoneBearing = l.bearing
+    }, onNmea = {})
+    onDispose { location.stop() }
+  }
+  val now by produceState(System.currentTimeMillis()) {
+    while (true) {
+      delay(1_000)
+      value = System.currentTimeMillis()
+    }
+  }
+  val state = if (session.connected) session else session.copy(userLocation = phone, bearingDeg = phoneBearing)
   LiveScreen(
+    nowMs = now,
     state = state,
     map = { modifier ->
       OfflineMap(

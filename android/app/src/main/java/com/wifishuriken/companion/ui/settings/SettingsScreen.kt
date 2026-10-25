@@ -73,6 +73,16 @@ fun SettingsScreen(mapStore: MapFileStore, onMapImported: () -> Unit, extras: @C
       if (result.isSuccess) onMapImported()
     }
   }
+  var importMessage by remember { mutableStateOf<String?>(null) }
+  var importing by remember { mutableStateOf(false) }
+  val importLogs = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+    if (uris.isEmpty()) return@rememberLauncherForActivityResult
+    importing = true
+    scope.launch {
+      importMessage = importCsvFiles(context, uris) { done, total -> importMessage = "Importing $done of $total..." }
+      importing = false
+    }
+  }
   val exportDb = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.sqlite3")) { uri ->
     if (uri == null) return@rememberLauncherForActivityResult
     exportMessage = "Exporting..."
@@ -115,6 +125,18 @@ fun SettingsScreen(mapStore: MapFileStore, onMapImported: () -> Unit, extras: @C
         }
       }
       Text("Theme follows the system light/dark setting.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+
+    Section("Import logs") {
+      Text(
+        "Add Shuriken CSV logs kept elsewhere (older logs, copies on a computer). Files already imported are skipped.",
+        fontSize = 13.sp,
+      )
+      if (importing) LinearProgressIndicator(Modifier.fillMaxWidth())
+      importMessage?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+      OutlinedButton(onClick = { importLogs.launch(CSV_TYPES) }, enabled = !importing) {
+        Text("Choose CSV files")
+      }
     }
 
     Section("Backup") {
