@@ -103,8 +103,9 @@ class WigleCsvTest {
   @Test
   fun rejectsMalformedRows() {
     assertTrue(WigleCsv.parseRecord("garbage") is WigleRecord.Unrecognized)
+    // An 11-field WIFI row that fails validation (bad MAC, time, channel) is rejected, not unrecognized.
     assertTrue(
-      WigleCsv.parseRecord("AA,\"s\",[OPEN],t,x,-1,,,,,WIFI") is WigleRecord.Unrecognized,
+      WigleCsv.parseRecord("AA,\"s\",[OPEN],t,x,-1,,,,,WIFI") is WigleRecord.Rejected,
     )
   }
 }
