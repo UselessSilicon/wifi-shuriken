@@ -19,8 +19,8 @@ private fun row(
   channel: Int = 6,
   auth: String = "[WPA2-PSK-CCMP][ESS]",
   time: String = "2026-10-15 12:00:00",
-  lat: String = "51.5000000",
-  lon: String = "-0.1200000",
+  lat: String = "1.5000000",
+  lon: String = "1.1200000",
 ): String {
   val quoted = "\"" + ssid.replace("\"", "\"\"") + "\""
   return "$mac,$quoted,$auth,$time,$channel,$rssi,$lat,$lon,12.0,3.5,WIFI\n"
@@ -111,7 +111,7 @@ class WigleCsvTest {
       assertEquals("Say \"hi\", ok", ssid)
       assertEquals(149, channel)
       assertEquals(-71, rssi)
-      assertEquals(51.5, latitude!!, 1e-9)
+      assertEquals(1.5, latitude!!, 1e-9)
       assertEquals(3.5, accuracyMeters!!, 1e-9)
     }
   }

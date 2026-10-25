@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
         CompanionApp(
           mapStore = mapStore,
           onConnect = ::findAndConnect,
+          onStop = { startService(LiveSessionService.stopIntent(this)) },
           settingsExtras = {
             if (BuildConfig.DEBUG) {
               Column(Modifier.padding(16.dp)) {

@@ -50,7 +50,7 @@ private val TABS = listOf(
 
 /** App shell: bottom navigation Live, Drives, Networks, Settings (design §6). */
 @Composable
-fun CompanionApp(mapStore: MapFileStore, onConnect: () -> Unit, settingsExtras: @Composable () -> Unit = {}) {
+fun CompanionApp(mapStore: MapFileStore, onConnect: () -> Unit, onStop: () -> Unit, settingsExtras: @Composable () -> Unit = {}) {
   val nav = rememberNavController()
   var mapFile by remember { mutableStateOf(mapStore.file.takeIf { mapStore.hasMap() }) }
   val current by nav.currentBackStackEntryAsState()
@@ -75,7 +75,7 @@ fun CompanionApp(mapStore: MapFileStore, onConnect: () -> Unit, settingsExtras: 
     },
   ) { padding ->
     NavHost(nav, startDestination = "live", modifier = Modifier.padding(padding)) {
-      composable("live") { LiveRoute(mapFile, onConnect) }
+      composable("live") { LiveRoute(mapFile, onConnect, onStop) }
       composable("drives") { DrivesScreen(mapFile, onOpenDrive = { nav.navigate("drive/$it") }) }
       composable("drive/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
         DriveDetailScreen(entry.arguments!!.getLong("id"), mapFile, onOpenNetworks = { nav.navigate("networks?tripId=$it") })
@@ -102,7 +102,7 @@ fun CompanionApp(mapStore: MapFileStore, onConnect: () -> Unit, settingsExtras: 
 }
 
 @Composable
-private fun LiveRoute(mapFile: File?, onConnect: () -> Unit) {
+private fun LiveRoute(mapFile: File?, onConnect: () -> Unit, onStop: () -> Unit) {
   val state by LiveSessionRepository.state.collectAsStateWithLifecycle()
   var headingUp by remember { mutableStateOf(false) }
   val dark = isSystemInDarkTheme()
@@ -116,7 +116,8 @@ private fun LiveRoute(mapFile: File?, onConnect: () -> Unit) {
       )
     },
     onToggleHeading = { headingUp = !headingUp },
-    onRecentre = { if (!state.connected) onConnect() },
+    onConnect = onConnect,
+    onStop = onStop,
     headingUp = headingUp,
   )
 }

@@ -5,12 +5,14 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.wifishuriken.companion.core.CounterSnapshot
 import com.wifishuriken.companion.core.ModuleFix
 import com.wifishuriken.companion.live.LiveState
 import com.wifishuriken.companion.ui.live.LiveScreen
 import com.wifishuriken.companion.ui.theme.CompanionTheme
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,7 +33,7 @@ class LiveScreenTest {
   @Test
   fun liveScreenShowsSixCounters() {
     compose.setContent {
-      CompanionTheme { LiveScreen(state = state, map = { Box(it) }, onToggleHeading = {}, onRecentre = {}) }
+      CompanionTheme { LiveScreen(state = state, map = { Box(it) }, onToggleHeading = {}, onConnect = {}, onStop = {}) }
     }
     for ((label, value) in listOf(
       "2.4 GHz" to "1,101", "5 GHz" to "2,202", "With GPS" to "3,303",
@@ -49,8 +51,18 @@ class LiveScreenTest {
   @Test
   fun noPhoneGpsChipWhenNotFeeding() {
     compose.setContent {
-      CompanionTheme { LiveScreen(state = state.copy(feeding = false), map = { Box(it) }, onToggleHeading = {}, onRecentre = {}) }
+      CompanionTheme { LiveScreen(state = state.copy(feeding = false), map = { Box(it) }, onToggleHeading = {}, onConnect = {}, onStop = {}) }
     }
     compose.onAllNodes(hasText("Phone GPS on")).assertCountEquals(0)
+  }
+
+  @Test
+  fun stopButtonEndsSessionWhenConnected() {
+    var stopped = false
+    compose.setContent {
+      CompanionTheme { LiveScreen(state = state, map = { Box(it) }, onToggleHeading = {}, onConnect = {}, onStop = { stopped = true }) }
+    }
+    compose.onNodeWithText("Stop").performClick()
+    assertTrue(stopped)
   }
 }

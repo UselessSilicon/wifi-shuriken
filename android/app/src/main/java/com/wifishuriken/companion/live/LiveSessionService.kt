@@ -3,6 +3,7 @@ package com.wifishuriken.companion.live
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -92,13 +93,17 @@ class LiveSessionService : Service() {
   }
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    if (intent?.action == ACTION_STOP) {
+      stopSelf()
+      return START_NOT_STICKY
+    }
     val device = intent?.let { IntentCompat.getParcelableExtra(it, EXTRA_DEVICE, UsbDevice::class.java) }
     if (device == null) {
       stopSelf()
       return START_NOT_STICKY
     }
     ServiceCompat.startForeground(
-      this, NOTIFICATION_ID, notification(),
+      this, NOTIFICATION_ID, buildNotification(this),
       ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
     )
     if (job?.isActive == true) return START_NOT_STICKY
@@ -110,11 +115,8 @@ class LiveSessionService : Service() {
 
   override fun onDestroy() {
     location?.stop()
-    job?.cancel()
+    shutdownSession(sendExecutor, job, SHUTDOWN_WAIT_MS)
     scope.cancel()
-    runCatching { conn?.close() }
-    conn = null
-    sendExecutor.shutdownNow()
     unregisterReceiver(detachReceiver)
     LiveSessionRepository.update { it.copy(connected = false, feeding = false, message = "Session ended") }
     super.onDestroy()
@@ -171,7 +173,6 @@ class LiveSessionService : Service() {
         }
         break
       } catch (e: MtpStalledException) {
-        conn = null
         if (reopened) {
           LiveSessionRepository.update { it.copy(connected = false, message = "The Shuriken stopped answering; unplug and replug") }
           break
@@ -181,9 +182,10 @@ class LiveSessionService : Service() {
       } catch (e: CancellationException) {
         throw e
       } catch (e: Exception) {
-        conn = null
         LiveSessionRepository.update { it.copy(connected = false, message = "USB error: ${e.message}") }
         break
+      } finally {
+        conn = null // the connection is closed by use {}; NMEA sends must not reach it
       }
     }
     withContext(Dispatchers.Main) { stopSelf() }
@@ -217,7 +219,7 @@ class LiveSessionService : Service() {
         val batch = pending.toList()
         pending.clear()
         val liveName = live
-        val mine = batch.filter { it.first == liveName }.map { it.second }
+        val mine = batch.groupBy({ it.first }, { it.second }).flatMap { (name, records) -> tracker.accept(name, records) }
         if (liveName != null && mine.isNotEmpty()) {
           ingestor.ingestRecords(liveName, mine)
           val now = System.currentTimeMillis()
@@ -252,19 +254,26 @@ class LiveSessionService : Service() {
     assets.open("oui/oui.tsv").bufferedReader().useLines { lines -> OuiTable(lines) }
   }.getOrNull()
 
-  private fun notification(): Notification {
-    val manager = getSystemService(NotificationManager::class.java)
-    manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Live session", NotificationManager.IMPORTANCE_LOW))
-    return NotificationCompat.Builder(this, CHANNEL_ID)
-      .setContentTitle("Shuriken live session")
-      .setContentText("Recording the trip and importing finished logs")
-      .setSmallIcon(R.drawable.ic_stat_session)
-      .setOngoing(true)
-      .build()
-  }
-
   companion object {
     const val EXTRA_DEVICE = "device"
+    const val ACTION_STOP = "com.wifishuriken.companion.action.STOP_SESSION"
+
+    /** Intent that ends the running session (notification action and the Live screen's Stop). */
+    fun stopIntent(context: Context): Intent = Intent(context, LiveSessionService::class.java).setAction(ACTION_STOP)
+
+    fun buildNotification(context: Context): Notification {
+      val manager = context.getSystemService(NotificationManager::class.java)
+      manager.createNotificationChannel(NotificationChannel(CHANNEL_ID, "Live session", NotificationManager.IMPORTANCE_LOW))
+      val stop = PendingIntent.getService(context, 0, stopIntent(context), PendingIntent.FLAG_IMMUTABLE)
+      return NotificationCompat.Builder(context, CHANNEL_ID)
+        .setContentTitle("Shuriken live session")
+        .setContentText("Recording the trip and importing finished logs")
+        .setSmallIcon(R.drawable.ic_stat_session)
+        .setOngoing(true)
+        .addAction(0, "Stop", stop)
+        .build()
+    }
+
     private const val CHANNEL_ID = "live_session"
     private const val NOTIFICATION_ID = 1
     private const val POLL_MS = 2_000L
@@ -273,6 +282,7 @@ class LiveSessionService : Service() {
     private const val FEED_FRESH_MS = 5_000L
     private const val MAX_TRACK_IN_STATE = 5_000
     private const val MAX_MAP_NETWORKS = 3_000
+    private const val SHUTDOWN_WAIT_MS = 1_500L
 
     private val UTC = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 

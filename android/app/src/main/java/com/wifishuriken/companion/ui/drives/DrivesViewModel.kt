@@ -25,9 +25,13 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+
+private const val MAX_DISPLAY_POINTS = 500
 
 enum class DateRange(private val days: Long?) {
   ALL(null), WEEK(7), MONTH(30);
@@ -47,13 +51,40 @@ data class DriveRow(
   val track: List<TrackPoint>,
 )
 
+/** At most [max] points of [track], evenly spaced, always keeping the first and last. */
+fun downsample(track: List<TrackPoint>, max: Int): List<TrackPoint> {
+  if (track.size <= max) return track
+  val step = (track.size - 1).toDouble() / (max - 1)
+  return List(max) { i -> track[Math.round(i * step).toInt()] }
+}
+
+/**
+ * Enriched rows by trip, reused while a trip's stored summary is unchanged: a live session updates
+ * the trips table every batch, and only the trip being recorded needs its track read again.
+ */
+class DriveRowCache {
+  private val mutex = Mutex()
+  private val byId = HashMap<Long, DriveRow>()
+
+  suspend fun rows(trips: List<TripSummary>, enrich: suspend (TripSummary) -> DriveRow): List<DriveRow> = mutex.withLock {
+    val out = trips.map { t -> byId[t.id]?.takeIf { it.summary == t } ?: enrich(t).also { byId[t.id] = it } }
+    byId.keys.retainAll(trips.mapTo(HashSet()) { it.id })
+    out
+  }
+
+  companion object {
+    /** Shared by the list and detail screens' view models. */
+    val shared = DriveRowCache()
+  }
+}
+
 /** Drives list (design §6.2): stored per-trip totals plus distance and mode from the trip's track. */
 class DrivesViewModel(app: Application) : AndroidViewModel(app) {
   private val dao = CompanionDb.get(app).dao()
   val modeFilter = MutableStateFlow<TripMode?>(null)
   val range = MutableStateFlow(DateRange.ALL)
 
-  private val rows = dao.tripsByStartDesc().map { trips -> trips.map { enrich(it) } }.flowOn(Dispatchers.IO)
+  private val rows = dao.tripsByStartDesc().map { trips -> DriveRowCache.shared.rows(trips, ::enrich) }.flowOn(Dispatchers.IO)
 
   val visible: StateFlow<List<DriveRow>> = combine(rows, modeFilter, range) { all, mode, r ->
     val cutoff = r.cutoffUtc()
@@ -76,6 +107,9 @@ class DrivesViewModel(app: Application) : AndroidViewModel(app) {
       dao.positionsForTrip(t.id).mapNotNull { p -> LiveSessionService.epochMs(p.tsUtc)?.let { TrackPoint(it, p.lat, p.lon) } }
     }
     val mode = t.mode?.let { runCatching { TripMode.valueOf(it) }.getOrNull() } ?: inferTripMode(track)
-    return DriveRow(t, trackDistanceM(track) / 1000.0, durationSeconds(t.startUtc, t.endUtc), percentOf(t.positionedRows, t.rows), mode, track)
+    return DriveRow(
+      t, trackDistanceM(track) / 1000.0, durationSeconds(t.startUtc, t.endUtc), percentOf(t.positionedRows, t.rows), mode,
+      downsample(track, MAX_DISPLAY_POINTS),
+    )
   }
 }
