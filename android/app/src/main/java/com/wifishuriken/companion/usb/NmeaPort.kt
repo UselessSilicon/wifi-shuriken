@@ -18,6 +18,10 @@ class NmeaPort(private val conn: UsbDeviceConnection, private val dataIface: Usb
   private val outEp: UsbEndpoint? = endpoint(UsbConstants.USB_DIR_OUT)
   private val sendLock = Any()
 
+  /** bulkTransfer result of the last write (diagnostics). */
+  @Volatile var lastWriteResult = 0
+    private set
+
   @Volatile private var running = false
   private var reader: Thread? = null
 
@@ -45,7 +49,9 @@ class NmeaPort(private val conn: UsbDeviceConnection, private val dataIface: Usb
     if (!Nmea.isForwardable(sentence)) return false
     val bytes = Nmea.frame(sentence)
     synchronized(sendLock) {
-      return conn.bulkTransfer(ep, bytes, bytes.size, WRITE_TIMEOUT_MS) == bytes.size
+      val n = conn.bulkTransfer(ep, bytes, bytes.size, WRITE_TIMEOUT_MS)
+      lastWriteResult = n
+      return n == bytes.size
     }
   }
 
