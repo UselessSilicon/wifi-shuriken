@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.ShurikenCompanion" parent="Theme.AppCompat.DayNight.NoActionBar" />
+    <!-- Compose draws everything; the window theme only needs no action bar and a neutral background. -->
+    <style name="Theme.ShurikenCompanion" parent="android:Theme.Material.NoActionBar" />
 </resources>

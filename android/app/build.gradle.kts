@@ -36,7 +36,6 @@ android {
   }
 
   buildFeatures {
-    viewBinding = true
     buildConfig = true
   }
 
@@ -61,23 +60,27 @@ dependencies {
   implementation(platform(libs.compose.bom))
   implementation(libs.compose.runtime)
   implementation(libs.compose.ui)
+  implementation(libs.compose.material3)
+  implementation(libs.compose.material.icons.core)
+  implementation(libs.compose.ui.tooling.preview)
+  implementation(libs.androidx.activity.compose)
+  implementation(libs.androidx.navigation.compose)
+  implementation(libs.androidx.lifecycle.viewmodel.compose)
+  debugImplementation(libs.compose.ui.tooling)
+  debugImplementation(libs.compose.ui.test.manifest)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.maplibre.android)
   implementation(libs.room.runtime)
   implementation(libs.room.ktx)
   ksp(libs.room.compiler)
-  // Prototype UI, removed in the Compose rewrite.
-  implementation("androidx.appcompat:appcompat:1.7.0")
-  implementation("androidx.activity:activity-ktx:1.9.3")
-  implementation("androidx.recyclerview:recyclerview:1.3.2")
-  implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
-  implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 
   testImplementation(libs.junit)
   testImplementation(libs.robolectric)
   testImplementation(libs.androidx.test.core)
   testImplementation(libs.androidx.test.junit)
   testImplementation(libs.kotlinx.coroutines.test)
+  testImplementation(platform(libs.compose.bom))
+  testImplementation(libs.compose.ui.test.junit4)
 }
 
 // The app must never be able to reach the network: fail the build if a library's manifest
