@@ -24,7 +24,10 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import com.wifishuriken.companion.core.ApStats
 import com.wifishuriken.companion.databinding.ActivityMainBinding
 import com.wifishuriken.companion.usb.ShurikenUsb
+import com.wifishuriken.companion.usb.UsbSelfTest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -58,6 +61,10 @@ class MainActivity : AppCompatActivity() {
     binding.apList.layoutManager = LinearLayoutManager(this)
     binding.apList.adapter = adapter
     binding.connectButton.setOnClickListener { findAndConnect() }
+    if (BuildConfig.DEBUG) {
+      // Debug builds only: long-press Connect runs the USB self-test (see UsbSelfTest).
+      binding.connectButton.setOnLongClickListener { runUsbSelfTest(); true }
+    }
 
     val filter = IntentFilter().apply {
       addAction(ACTION_USB_PERMISSION)
@@ -95,6 +102,25 @@ class MainActivity : AppCompatActivity() {
       }
     }
     findAndConnect()
+  }
+
+  private fun runUsbSelfTest() {
+    val device = ShurikenUsb.findDevice(usbManager)
+    if (device == null || !usbManager.hasPermission(device)) {
+      showMessage("Self-test: plug in the Shuriken and grant USB permission first (tap Connect).")
+      return
+    }
+    showMessage("Self-test running...")
+    lifecycleScope.launch(Dispatchers.IO) {
+      val report = runCatching { UsbSelfTest.run(applicationContext, device) }
+        .getOrElse { "Self-test failed: ${it.message}" }
+      withContext(Dispatchers.Main) { showMessage(report) }
+    }
+  }
+
+  private fun showMessage(text: String) {
+    binding.messageText.text = text
+    binding.messageText.visibility = View.VISIBLE
   }
 
   private fun findAndConnect() {
