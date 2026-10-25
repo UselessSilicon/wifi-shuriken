@@ -122,7 +122,13 @@ fun OfflineMap(
       }
     }
     lifecycle.addObserver(observer)
-    onDispose { lifecycle.removeObserver(observer) }
+    onDispose {
+      // Leaving the screen (not only the activity) must release the map's GL surface.
+      lifecycle.removeObserver(observer)
+      if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) mapView.onPause()
+      if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) mapView.onStop()
+      mapView.onDestroy()
+    }
   }
 
   LaunchedEffect(mapFile, dark) {

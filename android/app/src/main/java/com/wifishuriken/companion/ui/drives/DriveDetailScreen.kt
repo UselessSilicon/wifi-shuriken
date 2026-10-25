@@ -27,6 +27,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wifishuriken.companion.core.SecurityClass
 import com.wifishuriken.companion.core.TripMode
 import com.wifishuriken.companion.data.CompanionDb
+import com.wifishuriken.companion.data.Settings
 import com.wifishuriken.companion.data.NetworkFilter
 import com.wifishuriken.companion.data.NetworkSort
 import com.wifishuriken.companion.map.MapNetwork
@@ -36,7 +37,6 @@ import com.wifishuriken.companion.ui.theme.Accents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.util.Locale
 
 /** One drive: its map, stats, mode and a link to its networks (design §6.2). */
 @Composable
@@ -60,7 +60,7 @@ fun DriveDetailScreen(tripId: Long, mapFile: File?, onOpenNetworks: (Long) -> Un
     val s = row.summary
     Text("${s.startUtc} UTC", style = MaterialTheme.typography.titleLarge)
     Text(
-      listOfNotNull(row.durationS?.let { "%d min".format(it / 60) }, String.format(Locale.US, "%.1f km", row.distanceKm), "${row.positionedPct}% with GPS")
+      listOfNotNull(row.durationS?.let { "%d min".format(it / 60) }, formatDistance(row.distanceKm, remember { Settings(context).units }), "${row.positionedPct}% with GPS")
         .joinToString(" · "),
       color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp,
     )

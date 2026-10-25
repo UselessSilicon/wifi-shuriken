@@ -2,9 +2,6 @@ package com.wifishuriken.companion.ui
 
 import android.net.Uri
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.List
@@ -12,7 +9,6 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -24,7 +20,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -38,7 +33,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.wifishuriken.companion.live.LiveSessionRepository
+import com.wifishuriken.companion.map.MapFileStore
 import com.wifishuriken.companion.map.OfflineMap
+import com.wifishuriken.companion.ui.settings.SettingsScreen
 import com.wifishuriken.companion.ui.live.LiveScreen
 import java.io.File
 
@@ -53,8 +50,9 @@ private val TABS = listOf(
 
 /** App shell: bottom navigation Live, Drives, Networks, Settings (design §6). */
 @Composable
-fun CompanionApp(mapFile: File?, onConnect: () -> Unit, settingsExtras: @Composable () -> Unit = {}) {
+fun CompanionApp(mapStore: MapFileStore, onConnect: () -> Unit, settingsExtras: @Composable () -> Unit = {}) {
   val nav = rememberNavController()
+  var mapFile by remember { mutableStateOf(mapStore.file.takeIf { mapStore.hasMap() }) }
   val current by nav.currentBackStackEntryAsState()
   Scaffold(
     bottomBar = {
@@ -96,7 +94,9 @@ fun CompanionApp(mapFile: File?, onConnect: () -> Unit, settingsExtras: @Composa
         StatsScreen(entry.arguments!!.getLong("tripId").takeIf { it >= 0 }, onOpenNetwork = { nav.navigate("network/" + Uri.encode(it)) })
       }
       composable("network/{mac}") { entry -> NetworkDetailScreen(entry.arguments!!.getString("mac")!!, mapFile) }
-      composable("settings") { Column { Placeholder("Settings"); settingsExtras() } }
+      composable("settings") {
+        SettingsScreen(mapStore, onMapImported = { mapFile = mapStore.file.takeIf { mapStore.hasMap() } }, extras = settingsExtras)
+      }
     }
   }
 }
@@ -119,11 +119,4 @@ private fun LiveRoute(mapFile: File?, onConnect: () -> Unit) {
     onRecentre = { if (!state.connected) onConnect() },
     headingUp = headingUp,
   )
-}
-
-@Composable
-private fun Placeholder(title: String) {
-  Box(Modifier.padding(16.dp)) {
-    Text(title, style = MaterialTheme.typography.titleLarge)
-  }
 }
