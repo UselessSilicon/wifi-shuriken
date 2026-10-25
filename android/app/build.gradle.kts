@@ -39,6 +39,15 @@ android {
 
   testOptions {
     unitTests.isIncludeAndroidResources = true
+    unitTests.all {
+      // Robolectric reaches into JDK internals that JDK 25 no longer opens by default.
+      it.jvmArgs(
+        "--add-opens=java.base/java.io=ALL-UNNAMED",
+        "--add-opens=java.base/java.lang=ALL-UNNAMED",
+        "--add-opens=java.base/java.util=ALL-UNNAMED",
+        "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED",
+      )
+    }
   }
 }
 
@@ -48,6 +57,9 @@ dependencies {
   implementation(libs.kotlinx.coroutines.android)
   implementation(platform(libs.compose.bom))
   implementation(libs.compose.runtime)
+  implementation(libs.room.runtime)
+  implementation(libs.room.ktx)
+  ksp(libs.room.compiler)
   // Prototype UI, removed in the Compose rewrite.
   implementation("androidx.appcompat:appcompat:1.7.0")
   implementation("androidx.activity:activity-ktx:1.9.3")
@@ -56,6 +68,10 @@ dependencies {
   implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 
   testImplementation(libs.junit)
+  testImplementation(libs.robolectric)
+  testImplementation(libs.androidx.test.core)
+  testImplementation(libs.androidx.test.junit)
+  testImplementation(libs.kotlinx.coroutines.test)
 }
 
 // The app must never be able to reach the network: fail the build if a library's manifest
