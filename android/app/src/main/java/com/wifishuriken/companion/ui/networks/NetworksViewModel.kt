@@ -18,6 +18,15 @@ import kotlinx.coroutines.launch
 
 const val NETWORKS_PAGE = 100
 
+/**
+ * Appends a page, dropping rows already shown: OFFSET paging over a list that live ingest keeps
+ * re-sorting can return the same network twice, and the list's keys must be unique.
+ */
+fun <T> appendPage(existing: List<T>, next: List<T>, key: (T) -> Any): List<T> {
+  val seen = existing.mapTo(HashSet(), key)
+  return existing + next.filter { seen.add(key(it)) }
+}
+
 /** Networks browse state (design §6.3): filter, sort, a paged list and the header stats. */
 class NetworksViewModel(app: Application) : AndroidViewModel(app) {
   private val dao = CompanionDb.get(app).dao()
@@ -66,7 +75,7 @@ class NetworksViewModel(app: Application) : AndroidViewModel(app) {
     job = viewModelScope.launch(Dispatchers.IO) {
       val next = dao.networksPage(f, s, NETWORKS_PAGE, _items.value.size)
       endReached = next.size < NETWORKS_PAGE
-      _items.value += next
+      _items.value = appendPage(_items.value, next) { it.mac }
     }
   }
 

@@ -35,7 +35,8 @@ fun LiveScreen(
   state: LiveState,
   map: @Composable (Modifier) -> Unit,
   onToggleHeading: () -> Unit,
-  onRecentre: () -> Unit,
+  onConnect: () -> Unit,
+  onStop: () -> Unit,
   headingUp: Boolean = false,
   nowMs: Long = System.currentTimeMillis(),
 ) {
@@ -58,7 +59,7 @@ fun LiveScreen(
         verticalArrangement = Arrangement.spacedBy(6.dp),
       ) {
         FilledTonalButton(onClick = onToggleHeading) { Text(if (headingUp) "Heading" else "North") }
-        FilledTonalButton(onClick = onRecentre) { Text(if (state.connected) "Centre" else "Connect") }
+        if (state.connected) FilledTonalButton(onClick = onStop) { Text("Stop") } else FilledTonalButton(onClick = onConnect) { Text("Connect") }
       }
     }
     Column(
