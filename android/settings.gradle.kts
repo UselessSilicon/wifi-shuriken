@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "ShurikenCompanion"
-include(":app")
+include(":app", ":core")

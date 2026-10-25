@@ -1,22 +1,24 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import com.android.build.api.artifact.SingleArtifact
 
 plugins {
-  id("com.android.application")
-  id("org.jetbrains.kotlin.android")
+  // AGP 9 compiles Kotlin itself (built-in Kotlin); org.jetbrains.kotlin.android is not applied.
+  alias(libs.plugins.android.application)
+  alias(libs.plugins.kotlin.compose)
+  alias(libs.plugins.ksp)
 }
 
 android {
   namespace = "com.wifishuriken.companion"
-  compileSdk = 35
+  compileSdk {
+    version = release(37) { minorApiLevel = 2 }
+  }
 
   defaultConfig {
     applicationId = "com.wifishuriken.companion"
-    // API 24 adds MtpDevice.getPartialObject with 64-bit offsets and
-    // MtpObjectInfo.getCompressedSizeLong.
-    minSdk = 24
-    targetSdk = 35
-    versionCode = 1
-    versionName = "0.1.0"
+    minSdk = 33
+    targetSdk = 37
+    versionCode = 2
+    versionName = "0.2.0"
   }
 
   buildTypes {
@@ -33,22 +35,58 @@ android {
   buildFeatures {
     viewBinding = true
   }
-}
 
-kotlin {
-  compilerOptions {
-    jvmTarget.set(JvmTarget.JVM_17)
+  testOptions {
+    unitTests.isIncludeAndroidResources = true
   }
 }
 
 dependencies {
-  implementation("androidx.core:core-ktx:1.13.1")
+  implementation(project(":core"))
+  implementation(libs.androidx.core.ktx)
+  implementation(libs.kotlinx.coroutines.android)
+  implementation(platform(libs.compose.bom))
+  implementation(libs.compose.runtime)
+  // Prototype UI, removed in the Compose rewrite.
   implementation("androidx.appcompat:appcompat:1.7.0")
   implementation("androidx.activity:activity-ktx:1.9.3")
   implementation("androidx.recyclerview:recyclerview:1.3.2")
   implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
   implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
-  testImplementation("junit:junit:4.13.2")
+  testImplementation(libs.junit)
 }
+
+// The app must never be able to reach the network: fail the build if a library's manifest
+// merges a network permission in (MapLibre's does; the app manifest removes it).
+abstract class VerifyNoNetworkPermission : DefaultTask() {
+  @get:InputFile
+  abstract val mergedManifest: RegularFileProperty
+
+  @TaskAction
+  fun verify() {
+    val text = mergedManifest.get().asFile.readText()
+    val banned = listOf(
+      "android.permission.INTERNET",
+      "android.permission.ACCESS_NETWORK_STATE",
+      "android.permission.ACCESS_WIFI_STATE",
+    ).filter { text.contains("\"$it\"") }
+    if (banned.isNotEmpty()) {
+      throw GradleException("Merged manifest requests forbidden network permissions: $banned")
+    }
+  }
+}
+
+val verifyAll = tasks.register("verifyNoNetworkPermission")
+
+androidComponents {
+  onVariants { variant ->
+    val name = variant.name.replaceFirstChar { it.uppercase() }
+    val perVariant = tasks.register<VerifyNoNetworkPermission>("verifyNoNetworkPermission$name") {
+      mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
+    }
+    verifyAll.configure { dependsOn(perVariant) }
+  }
+}
+
+tasks.named("check") { dependsOn(verifyAll) }
