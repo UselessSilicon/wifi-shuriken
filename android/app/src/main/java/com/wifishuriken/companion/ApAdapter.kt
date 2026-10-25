@@ -25,7 +25,7 @@ class ApAdapter : ListAdapter<ApEntry, ApAdapter.Holder>(Diff) {
         R.string.ap_detail,
         ap.mac,
         ap.channel,
-        ap.band.label,
+        ap.band?.label ?: "?",
         ap.authMode,
         ap.sightings,
         ap.bestRssi,

@@ -142,6 +142,7 @@ class LogTailer(
       is WigleRecord.PreHeader -> preHeader = parsed.fields
       WigleRecord.ColumnHeader -> Unit
       is WigleRecord.Unrecognized -> unrecognizedRecords++
+      is WigleRecord.Rejected -> unrecognizedRecords++
     }
     return 0
   }

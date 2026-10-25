@@ -19,19 +19,8 @@ data class ApEntry(
   val isOpen: Boolean
     get() = authMode.contains("[OPEN]") || authMode.isBlank()
 
-  val band: Band
+  val band: Band?
     get() = Band.fromChannel(channel)
-}
-
-enum class Band(val label: String) {
-  GHZ_2_4("2.4 GHz"),
-  GHZ_5("5 GHz");
-
-  companion object {
-    // The controller schedules 2.4 GHz channels 1-14 and 5 GHz channels 36-165
-    // (include/channel_scheduler.h); 6 GHz is not scanned.
-    fun fromChannel(channel: Int): Band = if (channel in 1..14) GHZ_2_4 else GHZ_5
-  }
 }
 
 data class ApStats(
@@ -77,9 +66,9 @@ class ApTable {
         mac = s.mac,
         ssid = s.ssid,
         authMode = s.authMode,
-        channel = s.channel,
-        lastRssi = s.rssi,
-        bestRssi = s.rssi,
+        channel = s.channel ?: 0,
+        lastRssi = s.rssi ?: MISSING_RSSI,
+        bestRssi = s.rssi ?: MISSING_RSSI,
         firstSeen = s.firstSeen,
         lastSeen = s.firstSeen,
         sightings = 1,
@@ -90,16 +79,17 @@ class ApTable {
       return
     }
 
-    val stronger = s.rssi > existing.bestRssi
+    val rssi = s.rssi ?: MISSING_RSSI
+    val stronger = rssi > existing.bestRssi
     // Keep the location of the strongest sighting as the best AP position
     // estimate, but fill it in if the earlier, stronger row had no fix.
     val useNewLocation = s.hasLocation && (stronger || existing.bestLatitude == null)
     entries[s.mac] = existing.copy(
       ssid = s.ssid.ifEmpty { existing.ssid },
       authMode = s.authMode,
-      channel = s.channel,
-      lastRssi = s.rssi,
-      bestRssi = maxOf(existing.bestRssi, s.rssi),
+      channel = s.channel ?: existing.channel,
+      lastRssi = rssi,
+      bestRssi = maxOf(existing.bestRssi, rssi),
       lastSeen = s.firstSeen,
       sightings = existing.sightings + 1,
       bestLatitude = if (useNewLocation) s.latitude else existing.bestLatitude,
@@ -127,7 +117,7 @@ class ApTable {
     var b5 = 0
     for (e in entries.values) {
       if (e.isOpen) open++
-      if (e.band == Band.GHZ_2_4) b24++ else b5++
+      if (e.band == Band.GHZ_2_4) b24++ else if (e.band == Band.GHZ_5) b5++
     }
     return ApStats(
       rows = rows,
@@ -142,3 +132,6 @@ class ApTable {
     )
   }
 }
+
+/** Used for display only when a row carried no RSSI (the firmware always writes one). */
+private const val MISSING_RSSI = -100
