@@ -74,7 +74,7 @@ class MainActivity : ComponentActivity() {
     setContent {
       CompanionTheme {
         CompanionApp(
-          mapFile = mapStore.file.takeIf { mapStore.hasMap() },
+          mapStore = mapStore,
           onConnect = ::findAndConnect,
           settingsExtras = {
             if (BuildConfig.DEBUG) {

@@ -23,12 +23,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.wifishuriken.companion.core.TripMode
+import com.wifishuriken.companion.data.Settings
+import com.wifishuriken.companion.data.Units
 import com.wifishuriken.companion.map.OfflineMap
 import com.wifishuriken.companion.ui.components.cardModifier
 import com.wifishuriken.companion.ui.components.formatCount
@@ -84,6 +87,8 @@ fun DrivesScreen(mapFile: File?, onOpenDrive: (Long) -> Unit, vm: DrivesViewMode
 @Composable
 private fun DriveRowItem(row: DriveRow, onClick: () -> Unit) {
   val s = row.summary
+  val context = LocalContext.current
+  val units = remember { Settings(context).units }
   Column(cardModifier(Modifier.fillMaxWidth()).clickable(onClick = onClick).padding(10.dp)) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
       Text("${s.startUtc} UTC", fontWeight = FontWeight.SemiBold)
@@ -93,7 +98,7 @@ private fun DriveRowItem(row: DriveRow, onClick: () -> Unit) {
       listOfNotNull(
         row.mode?.label(),
         row.durationS?.let { "%d min".format(it / 60) },
-        String.format(Locale.US, "%.1f km", row.distanceKm),
+        formatDistance(row.distanceKm, units),
         "${formatCount(s.rows)} sightings",
         "${formatCount(s.uniqueMacs)} networks",
         "${row.positionedPct}% with GPS",
@@ -113,4 +118,9 @@ fun DateRange.label() = when (this) {
   DateRange.ALL -> "All time"
   DateRange.WEEK -> "This week"
   DateRange.MONTH -> "This month"
+}
+
+fun formatDistance(km: Double, units: Units): String = when (units) {
+  Units.METRIC -> String.format(Locale.US, "%.1f km", km)
+  Units.IMPERIAL -> String.format(Locale.US, "%.1f mi", km * 0.621371)
 }
