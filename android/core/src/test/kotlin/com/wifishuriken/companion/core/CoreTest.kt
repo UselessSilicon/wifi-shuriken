@@ -28,10 +28,34 @@ private fun row(
 
 class CsvRecordSplitterTest {
   @Test
+  fun splitterReportsRecordOffsets() {
+    val r1 = row("AA:BB:CC:DD:EE:01", "multi\nline", -50)
+    val r2 = row("AA:BB:CC:DD:EE:02", "b", -60)
+    val text = PRE_HEADER + COLUMNS + r1 + r2
+    val bytes = text.toByteArray()
+    val cut = (PRE_HEADER + COLUMNS).length + 10 // inside the first row
+    val splitter = CsvRecordSplitter()
+    val records = splitter.feed(bytes, 0, cut) + splitter.feed(bytes, cut, bytes.size - cut)
+    assertEquals(4, records.size)
+    assertEquals(0L, records[0].offset)
+    assertEquals(PRE_HEADER.length.toLong(), records[1].offset)
+    assertEquals((PRE_HEADER + COLUMNS).length.toLong(), records[2].offset)
+    assertEquals((PRE_HEADER + COLUMNS + r1).length.toLong(), records[3].offset)
+    assertEquals(r2.trimEnd(), records[3].text)
+  }
+
+  @Test
+  fun splitterOffsetsStartFromInitialOffset() {
+    val r2 = row("AA:BB:CC:DD:EE:02", "b", -60)
+    val records = CsvRecordSplitter(startOffset = 1000).feed(r2.toByteArray())
+    assertEquals(1000L, records.single().offset)
+  }
+
+  @Test
   fun splitsOnNewlinesOutsideQuotesOnly() {
     val splitter = CsvRecordSplitter()
     val text = row("AA:BB:CC:DD:EE:01", "multi\nline", -50) + row("AA:BB:CC:DD:EE:02", "b", -60)
-    val records = splitter.feed(text.toByteArray())
+    val records = splitter.feed(text.toByteArray()).map { it.text }
     assertEquals(2, records.size)
     assertTrue(records[0].contains("multi\nline"))
   }
@@ -43,7 +67,7 @@ class CsvRecordSplitterTest {
     val out = ArrayList<String>()
     // Feed one byte at a time so multi-byte UTF-8 sequences are split.
     for (b in bytes) {
-      out += splitter.feed(byteArrayOf(b))
+      out += splitter.feed(byteArrayOf(b)).map { it.text }
     }
     assertEquals(1, out.size)
     val parsed = WigleCsv.parseRecord(out[0]) as WigleRecord.Wifi
@@ -53,7 +77,7 @@ class CsvRecordSplitterTest {
 
   @Test
   fun stripsCarriageReturn() {
-    val records = CsvRecordSplitter().feed("a,b\r\n".toByteArray())
+    val records = CsvRecordSplitter().feed("a,b\r\n".toByteArray()).map { it.text }
     assertEquals(listOf("a,b"), records)
   }
 
@@ -62,7 +86,7 @@ class CsvRecordSplitterTest {
     val splitter = CsvRecordSplitter(maxRecordBytes = 200)
     val garbage = "\"" + "x".repeat(300) + "\n"
     val good = row("AA:BB:CC:DD:EE:03", "ok", -40)
-    val records = splitter.feed((garbage + "tail of bad record\n" + good).toByteArray())
+    val records = splitter.feed((garbage + "tail of bad record\n" + good).toByteArray()).map { it.text }
     assertEquals(1, splitter.droppedRecords)
     // The oversized record is dropped up to the next newline; what follows is
     // split normally, leaving one junk record and the intact row after it.

@@ -51,6 +51,8 @@ class LogTailer(
   private val source: RootFileSource,
   private val chunkBytes: Int = DEFAULT_CHUNK_BYTES,
   private val maxBytesPerPoll: Long = DEFAULT_MAX_BYTES_PER_POLL,
+  /** Receives every complete record of the active log with its file offset (the live ingest path). */
+  private val onRecord: ((logName: String, record: CsvRecord) -> Unit)? = null,
 ) {
   val table = ApTable()
   var preHeader: Map<String, String> = emptyMap()
@@ -109,8 +111,10 @@ class LogTailer(
       }
       offset += got
       readThisPoll += got
+      val name = activeName ?: info.name
       for (record in splitter.feed(buffer, 0, got)) {
-        rows += consume(record)
+        rows += consume(record.text)
+        onRecord?.invoke(name, record)
       }
     }
 
@@ -127,7 +131,7 @@ class LogTailer(
     activeHandle = handle
     activeName = name
     offset = 0
-    splitter.reset()
+    splitter.reset(0)
     table.clear()
     preHeader = emptyMap()
     unrecognizedRecords = 0
