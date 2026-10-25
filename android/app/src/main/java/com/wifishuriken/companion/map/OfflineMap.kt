@@ -20,6 +20,7 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
@@ -32,6 +33,7 @@ import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
+import org.maplibre.geojson.MultiLineString
 import org.maplibre.geojson.Point
 import java.io.File
 
@@ -89,6 +91,8 @@ fun OfflineMap(
   userLocation: TrackPoint?,
   bearingDeg: Float?,
   onNetworkClick: (String) -> Unit,
+  /** More tracks drawn as separate lines (e.g. every drive on "All on map"). */
+  extraTracks: List<List<TrackPoint>> = emptyList(),
 ) {
   val context = LocalContext.current
   val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -127,6 +131,29 @@ fun OfflineMap(
           hit?.getStringProperty("mac")?.let { onNetworkClick(it); true } ?: false
         }
       }
+    }
+  }
+
+  LaunchedEffect(style, extraTracks) {
+    val s = style ?: return@LaunchedEffect
+    val lines = extraTracks.filter { it.size >= 2 }.map { t -> t.map { Point.fromLngLat(it.lon, it.lat) } }
+    (s.getSource("tracks-all") as? GeoJsonSource)?.setGeoJson(
+      if (lines.isEmpty()) FeatureCollection.fromFeatures(emptyList())
+      else FeatureCollection.fromFeature(Feature.fromGeometry(MultiLineString.fromLngLats(lines))),
+    )
+  }
+
+  // Browsing maps fit the data once it is known; nothing is ever centred on a fixed place.
+  LaunchedEffect(map, followUser, track, extraTracks, networks) {
+    val m = map ?: return@LaunchedEffect
+    if (followUser) return@LaunchedEffect
+    val pts = track.map { it.lat to it.lon } + extraTracks.flatten().map { it.lat to it.lon } + networks.map { it.lat to it.lon }
+    if (pts.isEmpty()) return@LaunchedEffect
+    if (pts.size == 1 || pts.all { it == pts[0] }) {
+      m.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(pts[0].first, pts[0].second), 15.0))
+    } else {
+      val b = LatLngBounds.Builder().apply { pts.forEach { include(LatLng(it.first, it.second)) } }.build()
+      m.moveCamera(CameraUpdateFactory.newLatLngBounds(b, 60))
     }
   }
 
@@ -171,8 +198,14 @@ fun OfflineMap(
 private fun addOverlay(s: Style) {
   val empty = FeatureCollection.fromFeatures(emptyList())
   s.addSource(GeoJsonSource("track", empty))
+  s.addSource(GeoJsonSource("tracks-all", empty))
   s.addSource(GeoJsonSource("networks", empty, GeoJsonOptions().withCluster(true).withClusterMaxZoom(15).withClusterRadius(40)))
   s.addSource(GeoJsonSource("user", empty))
+  s.addLayer(
+    LineLayer("tracks-all-line", "tracks-all").withProperties(
+      PropertyFactory.lineColor("#FF7A00"), PropertyFactory.lineWidth(2.5f), PropertyFactory.lineOpacity(0.75f),
+    ),
+  )
   s.addLayer(
     LineLayer("track-line", "track").withProperties(
       PropertyFactory.lineColor("#2F7DF6"), PropertyFactory.lineWidth(4f), PropertyFactory.lineOpacity(0.9f),

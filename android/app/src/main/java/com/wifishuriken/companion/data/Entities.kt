@@ -125,3 +125,6 @@ data class SightingWithTrip(
   val lat: Double?,
   val lon: Double?,
 )
+
+/** A positioned sighting time and place (fallback track for trips without a phone track). */
+data class PositionRow(val tsUtc: String, val lat: Double, val lon: Double)
