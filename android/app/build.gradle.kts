@@ -1,3 +1,5 @@
+import java.security.MessageDigest
+import java.util.zip.GZIPInputStream
 import java.net.URI
 import com.android.build.api.artifact.SingleArtifact
 
@@ -58,6 +60,9 @@ dependencies {
   implementation(libs.kotlinx.coroutines.android)
   implementation(platform(libs.compose.bom))
   implementation(libs.compose.runtime)
+  implementation(libs.compose.ui)
+  implementation(libs.androidx.lifecycle.runtime.compose)
+  implementation(libs.maplibre.android)
   implementation(libs.room.runtime)
   implementation(libs.room.ktx)
   ksp(libs.room.compiler)
@@ -151,6 +156,70 @@ val generateOuiAsset = tasks.register<GenerateOuiAsset>("generateOuiAsset") {
   outputDir.set(layout.buildDirectory.dir("generated/ouiAssets"))
 }
 
+// Map fonts and sprites ship inside the app (the map never fetches anything): the pinned
+// protomaps/basemaps-assets archive is downloaded at build time, verified by SHA-256, and only the
+// fonts the styles use plus the v4 sprites are extracted.
+abstract class FetchMapAssets : DefaultTask() {
+  @get:Input abstract val url: Property<String>
+  @get:Input abstract val sha256: Property<String>
+  @get:Input abstract val prefixes: ListProperty<String>
+  @get:Internal abstract val cacheFile: RegularFileProperty
+  @get:OutputDirectory abstract val outputDir: DirectoryProperty
+
+  @TaskAction
+  fun fetch() {
+    val cache = cacheFile.get().asFile
+    if (!cache.exists() || sha256Of(cache) != sha256.get()) {
+      cache.parentFile.mkdirs()
+      try {
+        val conn = URI(url.get()).toURL().openConnection()
+        conn.connectTimeout = 30_000
+        conn.readTimeout = 120_000
+        conn.getInputStream().use { input -> cache.outputStream().use { input.copyTo(it) } }
+      } catch (e: Exception) {
+        throw GradleException("Map assets are not cached and could not be downloaded (${e.message})")
+      }
+      val actual = sha256Of(cache)
+      if (actual != sha256.get()) {
+        cache.delete()
+        throw GradleException("Map assets checksum mismatch: expected ${sha256.get()}, got $actual")
+      }
+    }
+    val out = outputDir.get().asFile.resolve("map")
+    out.deleteRecursively()
+    GZIPInputStream(cache.inputStream().buffered()).use { tar ->
+      val header = ByteArray(512)
+      while (tar.readNBytes(header, 0, 512) == 512 && header.any { it != 0.toByte() }) {
+        val name = String(header, 0, 100, Charsets.UTF_8).trimEnd('\u0000')
+        val prefix = String(header, 345, 155, Charsets.UTF_8).trimEnd('\u0000')
+        val size = String(header, 124, 12, Charsets.US_ASCII).trim('\u0000', ' ').ifEmpty { "0" }.toLong(8)
+        val type = header[156].toInt().toChar()
+        val full = if (prefix.isEmpty()) name else "$prefix/$name"
+        val rel = full.substringAfter('/')
+        val data = tar.readNBytes(size.toInt())
+        val pad = ((512 - size % 512) % 512).toInt()
+        if (pad > 0) tar.readNBytes(pad)
+        val regular = type == '0' || type == '\u0000'
+        if (!regular || rel.split('/').any { it == ".." } || prefixes.get().none { rel.startsWith(it) }) continue
+        val target = out.resolve(rel)
+        target.parentFile.mkdirs()
+        target.writeBytes(data)
+      }
+    }
+  }
+
+  private fun sha256Of(f: File): String =
+    MessageDigest.getInstance("SHA-256").digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+}
+
+val fetchMapAssets = tasks.register<FetchMapAssets>("fetchMapAssets") {
+  url.set("https://github.com/protomaps/basemaps-assets/archive/028c18f713baecad011301ff7a69acc39bcc2ae7.tar.gz")
+  sha256.set("57e40e8c512bd8042d0a3a251f19d0d1c8523ad963c666c3c6643bada4dc92d0")
+  prefixes.set(listOf("fonts/Noto Sans Regular/", "fonts/Noto Sans Medium/", "fonts/Noto Sans Italic/", "sprites/v4/"))
+  cacheFile.set(layout.buildDirectory.file("mapassets/basemaps-assets.tar.gz"))
+  outputDir.set(layout.buildDirectory.dir("generated/mapAssets"))
+}
+
 val verifyAll = tasks.register("verifyNoNetworkPermission")
 
 androidComponents {
@@ -161,6 +230,7 @@ androidComponents {
     }
     verifyAll.configure { dependsOn(perVariant) }
     variant.sources.assets?.addGeneratedSourceDirectory(generateOuiAsset, GenerateOuiAsset::outputDir)
+    variant.sources.assets?.addGeneratedSourceDirectory(fetchMapAssets, FetchMapAssets::outputDir)
   }
 }
 
