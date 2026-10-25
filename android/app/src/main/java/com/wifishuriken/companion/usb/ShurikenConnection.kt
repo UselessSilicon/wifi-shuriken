@@ -22,12 +22,16 @@ class ShurikenConnection private constructor(
   val nmea: NmeaPort?,
 ) : AutoCloseable {
 
+  private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+  /** Idempotent: the session and the service may both close it. Order: NMEA, then MTP, then USB. */
   override fun close() {
+    if (!closed.compareAndSet(false, true)) return
     try {
-      nmea?.stop()
+      runCatching { nmea?.stop() }
     } finally {
-      mtp.close()
-      usb.close()
+      runCatching { mtp.close() }
+      runCatching { usb.close() }
     }
   }
 
