@@ -1,5 +1,10 @@
 # Shuriken Companion v2: design
 
+> **Disclaimer:** Written entirely by an AI (Claude, by Anthropic), not by the repository owner, who did not
+> write or design it. Unofficial: not associated with or endorsed by the WiFi-Shuriken project; a personal
+> one-off.
+
+
 Status: draft for owner review. Builds on the working prototype in `android/`
 (live MTP log tailing, confirmed working on the owner's phone).
 
@@ -167,7 +172,7 @@ enterprise). New-this-trip networks get a violet ring.
 - Top ~55%: overhead map that follows the phone, with heading-up or north-up
   toggle and a recentre button. A blue line shows the trip so far. Status chips:
   Shuriken GPS state (e.g. "GPS 9" green, "no fix" amber), taken from the module's
-  own NMEA on the NMEA port, and "Phone GPS ✓" meaning **the app is sending phone
+  own NMEA on the NMEA port, and "Phone GPS on" meaning **the app is sending phone
   positions** (the firmware only uses them while its module has no fix).
 - Bottom ~45%: six counter tiles for this trip (2.4 GHz, 5 GHz, With GPS, No GPS,
   New, Seen before), a live "networks per minute" graph, and a trip strip (elapsed

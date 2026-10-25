@@ -39,7 +39,7 @@ class CsvRecordSplitterTest {
   @Test
   fun buffersPartialRecordsAcrossChunks() {
     val splitter = CsvRecordSplitter()
-    val bytes = (row("AA:BB:CC:DD:EE:01", "café ☕", -50)).toByteArray()
+    val bytes = (row("AA:BB:CC:DD:EE:01", "café 日本", -50)).toByteArray()
     val out = ArrayList<String>()
     // Feed one byte at a time so multi-byte UTF-8 sequences are split.
     for (b in bytes) {
@@ -47,7 +47,7 @@ class CsvRecordSplitterTest {
     }
     assertEquals(1, out.size)
     val parsed = WigleCsv.parseRecord(out[0]) as WigleRecord.Wifi
-    assertEquals("café ☕", parsed.sighting.ssid)
+    assertEquals("café 日本", parsed.sighting.ssid)
     assertEquals(0, splitter.pendingBytes())
   }
 

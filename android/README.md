@@ -1,5 +1,10 @@
 # Shuriken Companion (Android prototype)
 
+> **Disclaimer:** Written entirely by an AI (Claude, by Anthropic), not by the repository owner, who did not
+> write or design it. Unofficial: not associated with or endorsed by the WiFi-Shuriken project; a personal
+> one-off.
+
+
 Live view of a WiFi-Shuriken scan log on an Android phone over USB, with no
 firmware changes. The phone acts as USB host, opens the controller's read-only
 MTP interface, and tails the active `shuriken_<timestamp>.csv` on the SD card.
