@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  Matches USB devices exposing an MTP/PTP (Still Image) interface, which is how
-  the controller presents its SD card. The app then prefers a device whose
-  product string is "WiFi Shuriken" (USB_DEVICE_PRODUCT_NAME).
--->
+<!-- Only the WiFi Shuriken controller (USB 2886:0058) opens the app on attach. -->
 <resources>
-    <usb-device class="6" subclass="1" protocol="1" />
+    <usb-device vendor-id="10374" product-id="88" />
 </resources>

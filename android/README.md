@@ -24,7 +24,10 @@ commit fixes MTP (see Hardware notes).
   Shuriken's LED reflects only its own GNSS module, so it can stay amber while the phone
   feed is in use. You can turn the feed off in Settings.
 - **Archive:** every `shuriken_*.csv` on the SD card is copied into app storage and
-  imported once. Files are matched by name and size, then MD5. The log being written
+  imported once, streamed in chunks so long logs never have to fit in memory. Files are
+  matched by name and size, then MD5. A file that cannot be imported is retried on the
+  next sessions (beside the live view, never before it) and set aside after three
+  failures, so one bad file cannot stop recording. The log being written
   is tailed live, record by record.
 - **Import logs:** Settings > Import logs > Choose CSV files adds Shuriken CSV logs kept
   elsewhere (older logs, copies on a computer). File names may carry a prefix
@@ -62,8 +65,9 @@ commit fixes MTP (see Hardware notes).
 - Diagnostics are minimal: the app logs session steps and errors to logcat under the tag
   `ShurikenDiag` (connected, sync counts, failures, first GPS sentence written). It never
   logs positions, MAC addresses or network names.
-- The APK built here is a debug build. With USB debugging on, a debug build's data can be
-  read over adb; turn USB/wireless debugging off when not developing.
+- Use a release build on the phone (`assembleRelease`, below): it is not debuggable and
+  carries no developer tooling. A debug build's data can be read over adb while USB
+  debugging is on. Either way, turn USB/wireless debugging off when not developing.
 
 ## Getting a map file
 
@@ -103,7 +107,21 @@ The first build downloads the IEEE OUI list and the pinned
 `protomaps/basemaps-assets` fonts and sprites (checked against a SHA-256) into
 `build/generated`. Later builds use the cached copies.
 
-The **Android Companion** CI workflow builds `app-debug.apk`.
+For the phone, build a release:
+
+```
+./gradlew :app:verifyNoNetworkPermission assembleRelease
+```
+
+It is signed only if your own `~/.gradle/gradle.properties` (never committed) sets
+`companionStoreFile`, `companionStorePassword`, `companionKeyAlias` and
+`companionKeyPassword`; otherwise the release APK is unsigned. Sign with the same key as
+the app already installed: Android only updates an app in place when the key matches,
+and a different key means uninstalling it, which deletes its database and archive
+(backup is disabled on purpose).
+
+The **Android Companion** CI workflow builds `app-debug.apk` (signed with a throwaway CI
+key, so it cannot update an app installed from your own builds).
 
 ## Layout
 
@@ -119,6 +137,8 @@ The **Android Companion** CI workflow builds `app-debug.apk`.
 
 ## Known limits
 
+- The app opens only for the Shuriken (USB 2886:0058); other MTP devices such as cameras
+  and phones are ignored.
 - On some phones the system MTP handler claims the device first. If the app cannot
   open it, unplug, plug back in, and choose this app when asked.
 - Tested on a Samsung Galaxy S23 (Android 17) on 2026-10-25: connection, archive sync,

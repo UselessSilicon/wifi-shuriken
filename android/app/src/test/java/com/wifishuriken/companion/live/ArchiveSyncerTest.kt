@@ -124,7 +124,7 @@ class ArchiveSyncerTest {
   fun archivedFilesWithoutTripAreReingested() = runBlocking {
     syncer.syncOnce(card(), activeLog = null)
     db.clearAllTables()
-    val n = syncer.reingestOrphans()
+    val n = syncer.reingestOrphans().ingested
     assertEquals(2, n)
     assertNotNull(db.dao().tripByLogName(a))
     assertNotNull(db.dao().tripByLogName(b))

@@ -39,6 +39,36 @@ class ArchiveStore(val archiveDir: File) {
   @Synchronized
   fun recordDuplicate(entry: IndexEntry) = writeIndex(index().plus(entry))
 
+  private val attemptsFile = File(archiveDir, "attempts.tsv")
+
+  /** Failed import attempts per archived log, kept across restarts (name -> count). */
+  @Synchronized
+  fun importAttempts(): Map<String, Int> =
+    if (!attemptsFile.exists()) emptyMap()
+    else attemptsFile.readLines().mapNotNull { l -> l.split('\t').takeIf { it.size == 2 }?.let { it[1] to (it[0].toIntOrNull() ?: 0) } }.toMap()
+
+  @Synchronized
+  fun recordFailedImport(name: String): Int {
+    val next = (importAttempts()[name] ?: 0) + 1
+    writeAtomically(attemptsFile, (importAttempts() + (name to next)).entries.joinToString("") { "${it.value}\t${it.key}\n" })
+    return next
+  }
+
+  @Synchronized
+  fun clearFailedImport(name: String) {
+    val a = importAttempts()
+    if (name in a) writeAtomically(attemptsFile, (a - name).entries.joinToString("") { "${it.value}\t${it.key}\n" })
+  }
+
+  private fun writeAtomically(target: File, text: String) {
+    val tmp = File(archiveDir, target.name + ".tmp")
+    tmp.writeText(text)
+    if (!tmp.renameTo(target)) {
+      target.writeText(text)
+      tmp.delete()
+    }
+  }
+
   private fun writeIndex(index: HashIndex) {
     val tmp = File(archiveDir, "index.tsv.tmp")
     tmp.writeText(index.serialize())
