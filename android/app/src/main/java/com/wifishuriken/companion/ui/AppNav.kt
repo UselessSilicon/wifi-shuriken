@@ -25,7 +25,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
+import androidx.navigation.navArgument
+import com.wifishuriken.companion.ui.drives.DriveDetailScreen
+import com.wifishuriken.companion.ui.drives.DrivesScreen
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -39,7 +43,7 @@ private data class Tab(val route: String, val label: String, val icon: ImageVect
 private val TABS = listOf(
   Tab("live", "Live", Icons.Filled.Place),
   Tab("drives", "Drives", Icons.Filled.List),
-  Tab("networks", "Networks", Icons.Filled.Search),
+  Tab("networks?tripId=-1", "Networks", Icons.Filled.Search),
   Tab("settings", "Settings", Icons.Filled.Settings),
 )
 
@@ -53,7 +57,7 @@ fun CompanionApp(mapFile: File?, onConnect: () -> Unit, settingsExtras: @Composa
       NavigationBar {
         TABS.forEach { tab ->
           NavigationBarItem(
-            selected = current?.destination?.route == tab.route,
+            selected = current?.destination?.route?.substringBefore('?') == tab.route.substringBefore('?'),
             onClick = {
               nav.navigate(tab.route) {
                 popUpTo("live") { saveState = true }
@@ -70,8 +74,14 @@ fun CompanionApp(mapFile: File?, onConnect: () -> Unit, settingsExtras: @Composa
   ) { padding ->
     NavHost(nav, startDestination = "live", modifier = Modifier.padding(padding)) {
       composable("live") { LiveRoute(mapFile, onConnect) }
-      composable("drives") { Placeholder("Drives") }
-      composable("networks") { Placeholder("Networks") }
+      composable("drives") { DrivesScreen(mapFile, onOpenDrive = { nav.navigate("drive/$it") }) }
+      composable("drive/{id}", arguments = listOf(navArgument("id") { type = NavType.LongType })) { entry ->
+        DriveDetailScreen(entry.arguments!!.getLong("id"), mapFile, onOpenNetworks = { nav.navigate("networks?tripId=$it") })
+      }
+      composable(
+        "networks?tripId={tripId}",
+        arguments = listOf(navArgument("tripId") { type = NavType.LongType; defaultValue = -1L }),
+      ) { Placeholder("Networks") }
       composable("settings") { Column { Placeholder("Settings"); settingsExtras() } }
     }
   }

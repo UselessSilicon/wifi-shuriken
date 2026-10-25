@@ -71,6 +71,12 @@ interface CompanionDao {
   )
   suspend fun updateTripTotals(tripId: Long, rows: Int, rejected: Int, uniqueMacs: Int, positioned: Int, newCount: Int, endUtc: String?)
 
+  @Query("SELECT tsUtc, lat, lon FROM sightings WHERE tripId = :tripId AND lat IS NOT NULL ORDER BY tsUtc")
+  suspend fun positionsForTrip(tripId: Long): List<PositionRow>
+
+  @Query("SELECT * FROM trips WHERE id = :tripId")
+  suspend fun tripById(tripId: Long): TripEntity?
+
   @Query("UPDATE trips SET mode = :mode WHERE id = :tripId")
   suspend fun setTripMode(tripId: Long, mode: String?)
 
