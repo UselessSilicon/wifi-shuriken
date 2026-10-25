@@ -50,10 +50,10 @@ poll. During catch-up it polls about every 50 ms.
   it has both, so the app shows "No scan log yet" until then.
 - **Per-boot view.** When the controller starts a new log file, the app resets
   its tables to match.
-- **Polling holds the SD lock.** Each read pauses the controller's CSV writes
-  for its duration. Reads are capped at 16 KiB, and the controller's queue holds
-  1024 results, so this should not drop rows. Do not shorten the poll interval
-  aggressively.
+- **Polling shares the SD card.** The controller releases its SD lock between
+  transfer chunks, so logging continues during reads. A transfer that stalls for
+  5 s is abandoned by the firmware; the app treats that as a transient error and
+  retries on the next poll.
 - **Power.** If the phone powers the Shuriken over OTG, the phone battery runs
   down faster.
 - **Not tested on hardware yet.** The core logic is unit-tested; the USB/MTP path
