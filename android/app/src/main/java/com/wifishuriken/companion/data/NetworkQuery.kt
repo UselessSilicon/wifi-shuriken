@@ -23,8 +23,8 @@ class NetworksQuery(val sql: String, val args: Array<Any?>) {
   fun toSupport() = SimpleSQLiteQuery(sql, args)
 }
 
-/** Builds the Networks screen query; every ORDER BY has a stable tiebreak (mac) so paging is stable. */
-fun buildNetworksQuery(filter: NetworkFilter, sort: NetworkSort, limit: Int, offset: Int): NetworksQuery {
+/** The WHERE clause (with leading " WHERE ", or empty) and its arguments for [filter] over `networks n`. */
+fun networksWhere(filter: NetworkFilter): Pair<String, List<Any?>> {
   val where = ArrayList<String>()
   val args = ArrayList<Any?>()
   filter.tripId?.let {
@@ -47,6 +47,13 @@ fun buildNetworksQuery(filter: NetworkFilter, sort: NetworkSort, limit: Int, off
     args += "%$it%"
     args += "%${it.uppercase()}%"
   }
+  return (if (where.isEmpty()) "" else " WHERE " + where.joinToString(" AND ")) to args
+}
+
+/** Builds the Networks screen query; every ORDER BY has a stable tiebreak (mac) so paging is stable. */
+fun buildNetworksQuery(filter: NetworkFilter, sort: NetworkSort, limit: Int, offset: Int): NetworksQuery {
+  val (whereSql, whereArgs) = networksWhere(filter)
+  val args = ArrayList(whereArgs)
   val order = when (sort) {
     NetworkSort.MOST_SEEN -> "n.sightings DESC, n.mac"
     NetworkSort.NEWEST -> "n.lastSeenUtc DESC, n.mac"
@@ -57,8 +64,13 @@ fun buildNetworksQuery(filter: NetworkFilter, sort: NetworkSort, limit: Int, off
     NetworkSort.VENDOR -> "n.vendor IS NULL, n.vendor COLLATE NOCASE, n.mac"
     NetworkSort.MOST_TRIPS -> "n.trips DESC, n.mac"
   }
-  val whereSql = if (where.isEmpty()) "" else " WHERE " + where.joinToString(" AND ")
   args += limit
   args += offset
   return NetworksQuery("SELECT n.* FROM networks n$whereSql ORDER BY $order LIMIT ? OFFSET ?", args.toTypedArray())
+}
+
+/** Security class counts for the networks matching [filter] (header stats). */
+fun buildSecurityMixQuery(filter: NetworkFilter): NetworksQuery {
+  val (whereSql, args) = networksWhere(filter)
+  return NetworksQuery("SELECT n.security AS security, COUNT(*) AS n FROM networks n$whereSql GROUP BY n.security", args.toTypedArray())
 }

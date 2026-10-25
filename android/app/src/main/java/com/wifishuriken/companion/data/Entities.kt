@@ -128,3 +128,12 @@ data class SightingWithTrip(
 
 /** A positioned sighting time and place (fallback track for trips without a phone track). */
 data class PositionRow(val tsUtc: String, val lat: Double, val lon: Double)
+
+/** One security class and how many networks have it. */
+data class SecurityCount(val security: String, val n: Int)
+
+/** How many networks use [channel] on [band]. */
+data class ChannelCount(val band: String, val channel: Int, val n: Int)
+
+/** A name (SSID or vendor) and how many networks carry it. */
+data class NameCount(val name: String, val n: Int)

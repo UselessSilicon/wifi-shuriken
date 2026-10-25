@@ -10,3 +10,6 @@ data class MapNetwork(
   val security: SecurityClass,
   val newThisTrip: Boolean,
 )
+
+/** A network's estimated position and its uncertainty radius, drawn as a shaded circle. */
+data class MapEstimate(val lat: Double, val lon: Double, val radiusM: Double)

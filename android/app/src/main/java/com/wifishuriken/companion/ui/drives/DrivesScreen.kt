@@ -109,7 +109,7 @@ fun TripMode.label() = when (this) {
   TripMode.BIKE -> "Bike"
 }
 
-private fun DateRange.label() = when (this) {
+fun DateRange.label() = when (this) {
   DateRange.ALL -> "All time"
   DateRange.WEEK -> "This week"
   DateRange.MONTH -> "This month"

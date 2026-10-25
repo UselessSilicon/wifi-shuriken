@@ -9,6 +9,15 @@ import androidx.room.Upsert
 import androidx.sqlite.db.SupportSQLiteQuery
 import kotlinx.coroutines.flow.Flow
 
+/** Networks header stats: security mix plus the shares the design asks for. */
+data class NetworkStats(val bySecurity: Map<String, Int>) {
+  val total = bySecurity.values.sum()
+  val percentOpen = pct(bySecurity["OPEN_OR_OWE"] ?: 0)
+  val percentWpa3Capable = pct((bySecurity["WPA3"] ?: 0) + (bySecurity["WPA2_WPA3"] ?: 0))
+
+  private fun pct(n: Int) = if (total == 0) 0 else Math.round(n * 100.0 / total).toInt()
+}
+
 @Dao
 interface CompanionDao {
   @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -89,6 +98,37 @@ interface CompanionDao {
   suspend fun networksPage(filter: NetworkFilter, sort: NetworkSort, limit: Int, offset: Int): List<NetworkEntity> =
     networksRaw(buildNetworksQuery(filter, sort, limit, offset).toSupport())
 
+  @RawQuery(observedEntities = [NetworkEntity::class])
+  suspend fun securityMixRaw(query: SupportSQLiteQuery): List<SecurityCount>
+
+  /** Header stats for the networks matching [filter]. */
+  suspend fun networkStats(filter: NetworkFilter): NetworkStats =
+    NetworkStats(securityMixRaw(buildSecurityMixQuery(filter).toSupport()).associate { it.security to it.n })
+
+  @Query(
+    "SELECT n.band AS band, n.channel AS channel, COUNT(*) AS n FROM networks n" +
+      " WHERE n.band IS NOT NULL AND n.channel IS NOT NULL AND $TRIP_SCOPE GROUP BY n.band, n.channel ORDER BY n.band, n.channel",
+  )
+  suspend fun channelUsage(tripId: Long?): List<ChannelCount>
+
+  @Query(
+    "SELECT n.vendor AS name, COUNT(*) AS n FROM networks n WHERE n.vendor IS NOT NULL AND $TRIP_SCOPE" +
+      " GROUP BY n.vendor ORDER BY n DESC, n.vendor LIMIT :limit",
+  )
+  suspend fun topVendors(tripId: Long?, limit: Int): List<NameCount>
+
+  @Query(
+    "SELECT n.ssid AS name, COUNT(*) AS n FROM networks n WHERE n.ssid != '' AND $TRIP_SCOPE" +
+      " GROUP BY n.ssid ORDER BY n DESC, n.ssid LIMIT :limit",
+  )
+  suspend fun topNames(tripId: Long?, limit: Int): List<NameCount>
+
+  @Query("SELECT COUNT(*) FROM networks n WHERE n.estMethod = 'MOBILE' AND $TRIP_SCOPE")
+  suspend fun mobileCount(tripId: Long?): Int
+
+  @Query("SELECT * FROM networks n WHERE n.estMethod = 'MOBILE' AND $TRIP_SCOPE ORDER BY n.maxSpreadM DESC, n.mac LIMIT :limit")
+  suspend fun mobileNetworks(tripId: Long?, limit: Int): List<NetworkEntity>
+
   @Query("SELECT * FROM networks WHERE mac = :mac")
   suspend fun networkDetail(mac: String): NetworkEntity?
 
@@ -108,5 +148,8 @@ interface CompanionDao {
     const val SQL_TRIPS_BY_START_DESC =
       "SELECT id, logName, startUtc, endUtc, rows, uniqueMacs, positionedRows, newCount, mode FROM trips ORDER BY startUtc DESC"
     const val SQL_SIGHTINGS_FOR = "SELECT * FROM sightings WHERE mac = :mac ORDER BY tsUtc"
+
+    /** Restricts `networks n` to one trip when :tripId is not null. */
+    const val TRIP_SCOPE = "(:tripId IS NULL OR EXISTS (SELECT 1 FROM sightings s WHERE s.mac = n.mac AND s.tripId = :tripId))"
   }
 }

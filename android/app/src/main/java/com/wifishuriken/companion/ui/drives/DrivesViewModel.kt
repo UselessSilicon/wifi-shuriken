@@ -29,7 +29,14 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
-enum class DateRange { ALL, WEEK, MONTH }
+enum class DateRange(private val days: Long?) {
+  ALL(null), WEEK(7), MONTH(30);
+
+  /** Earliest included time as a log timestamp (UTC), or null for all time. */
+  fun cutoffUtc(): String? = days?.let {
+    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC).format(Instant.now().minusSeconds(it * 86_400))
+  }
+}
 
 data class DriveRow(
   val summary: TripSummary,
@@ -49,11 +56,7 @@ class DrivesViewModel(app: Application) : AndroidViewModel(app) {
   private val rows = dao.tripsByStartDesc().map { trips -> trips.map { enrich(it) } }.flowOn(Dispatchers.IO)
 
   val visible: StateFlow<List<DriveRow>> = combine(rows, modeFilter, range) { all, mode, r ->
-    val cutoff = when (r) {
-      DateRange.ALL -> null
-      DateRange.WEEK -> utcDaysAgo(7)
-      DateRange.MONTH -> utcDaysAgo(30)
-    }
+    val cutoff = r.cutoffUtc()
     all.filter { (mode == null || it.mode == mode) && (cutoff == null || it.summary.startUtc >= cutoff) }
   }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -75,7 +78,4 @@ class DrivesViewModel(app: Application) : AndroidViewModel(app) {
     val mode = t.mode?.let { runCatching { TripMode.valueOf(it) }.getOrNull() } ?: inferTripMode(track)
     return DriveRow(t, trackDistanceM(track) / 1000.0, durationSeconds(t.startUtc, t.endUtc), percentOf(t.positionedRows, t.rows), mode, track)
   }
-
-  private fun utcDaysAgo(days: Long): String =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneOffset.UTC).format(Instant.now().minusSeconds(days * 86_400))
 }
