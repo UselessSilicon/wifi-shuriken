@@ -105,10 +105,12 @@ class MainActivity : ComponentActivity() {
 
   private fun handleIntent(intent: Intent?) {
     if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
-      IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)?.let {
-        connectWithPermission(it)
-        return
-      }
+      IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
+        ?.let { ShurikenUsb.resolve(usbManager, it) }
+        ?.let {
+          connectWithPermission(it)
+          return
+        }
     }
     findAndConnect()
   }

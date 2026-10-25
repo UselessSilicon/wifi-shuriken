@@ -49,6 +49,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -176,15 +177,23 @@ class LiveSessionService : Service() {
           conn = c
           Diag.i("session: connected, nmeaPort=${c.nmea != null}")
           LiveSessionRepository.update { it.copy(connected = true, message = null, syncProgress = "Checking archive") }
-          syncer.reingestOrphans()
           val source = MtpCardSource(c)
           val report = syncer.syncOnce(source, activeLog = null)
           Diag.i("session: archive sync archived=${report.archived} failed=${report.failed}")
-          LiveSessionRepository.update {
-            it.copy(syncProgress = "Imported ${report.archived} new log(s)" + if (report.failed > 0) ", ${report.failed} to retry" else "")
-          }
+          LiveSessionRepository.update { it.copy(syncProgress = syncSummary(report.archived, report.failed, report.importFailed)) }
           c.nmea?.start { line -> parseModuleFix(line)?.let { f -> LiveSessionRepository.update { it.copy(moduleFix = f) } } }
-          tail(source, ingestor, syncer, db)
+          coroutineScope {
+            // Archived logs without a trip are imported beside the live tail, never before it,
+            // so a slow or failing file cannot hold up recording.
+            launch {
+              val r = syncer.reingestOrphans()
+              if (r.failed > 0 || r.quarantined > 0) Diag.w("session: orphan logs failed=${r.failed} setAside=${r.quarantined}")
+              if (r.quarantined > 0) {
+                LiveSessionRepository.update { it.copy(syncProgress = "${r.quarantined} archived log(s) could not be imported") }
+              }
+            }
+            tail(source, ingestor, syncer, db)
+          }
         }
         Diag.i("session: ended normally")
         break
@@ -301,6 +310,14 @@ class LiveSessionService : Service() {
     private const val SHUTDOWN_WAIT_MS = 1_500L
 
     private val UTC = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+    /** One line for Live about the card sync. */
+    fun syncSummary(archived: Int, failed: Int, importFailed: Int): String =
+      listOfNotNull(
+        "Imported $archived new log(s)",
+        failed.takeIf { it > 0 }?.let { "$it to retry" },
+        importFailed.takeIf { it > 0 }?.let { "$it could not be read" },
+      ).joinToString(", ")
 
     fun epochMs(utc: String): Long? =
       runCatching { LocalDateTime.parse(utc, UTC).toInstant(ZoneOffset.UTC).toEpochMilli() }.getOrNull()

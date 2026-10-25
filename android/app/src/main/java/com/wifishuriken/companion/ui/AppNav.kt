@@ -7,6 +7,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.wifishuriken.companion.core.TrackPoint
 import com.wifishuriken.companion.live.PhoneLocation
@@ -111,6 +112,9 @@ fun CompanionApp(mapStore: MapFileStore, onConnect: () -> Unit, onStop: () -> Un
   }
 }
 
+/** The Live screen reads the phone's GPS itself only while visible and without a session. */
+fun phoneGpsActive(connected: Boolean, canLocate: Boolean, visible: Boolean): Boolean = !connected && canLocate && visible
+
 @Composable
 private fun LiveRoute(mapFile: File?, onConnect: () -> Unit, onStop: () -> Unit) {
   val session by LiveSessionRepository.state.collectAsStateWithLifecycle()
@@ -118,16 +122,18 @@ private fun LiveRoute(mapFile: File?, onConnect: () -> Unit, onStop: () -> Unit)
   val dark = isSystemInDarkTheme()
   val context = LocalContext.current
   // Re-checked on resume so the position appears right after the permission is granted.
-  val resumed by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
-  val canLocate = remember(resumed) {
+  val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
+  val visible = lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+  val canLocate = remember(lifecycleState) {
     ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
   }
   // Without a session the screen reads the phone's GPS itself (only while visible); during a
   // session the service does, for the track and the feed to the Shuriken.
   var phone by remember { mutableStateOf<TrackPoint?>(null) }
   var phoneBearing by remember { mutableStateOf<Float?>(null) }
-  DisposableEffect(session.connected, canLocate) {
-    if (session.connected || !canLocate) return@DisposableEffect onDispose {}
+  val readGps = phoneGpsActive(session.connected, canLocate, visible)
+  DisposableEffect(readGps) {
+    if (!readGps) return@DisposableEffect onDispose {}
     val location = PhoneLocation(context)
     location.start(onLocation = { l ->
       phone = TrackPoint(l.time, l.latitude, l.longitude)
@@ -135,8 +141,8 @@ private fun LiveRoute(mapFile: File?, onConnect: () -> Unit, onStop: () -> Unit)
     }, onNmea = {})
     onDispose { location.stop() }
   }
-  val now by produceState(System.currentTimeMillis()) {
-    while (true) {
+  val now by produceState(System.currentTimeMillis(), visible) {
+    while (visible) {
       delay(1_000)
       value = System.currentTimeMillis()
     }

@@ -11,7 +11,7 @@ import androidx.room.RoomDatabase
     TrackPointEntity::class, ArchivedFileEntity::class,
   ],
   version = 1,
-  exportSchema = false,
+  exportSchema = true,
 )
 abstract class CompanionDb : RoomDatabase() {
   abstract fun dao(): CompanionDao

@@ -6,6 +6,8 @@ import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import com.wifishuriken.companion.core.Nmea
 import com.wifishuriken.companion.core.NmeaLineAssembler
+import com.wifishuriken.companion.core.ReadAction
+import com.wifishuriken.companion.core.ReadFailurePolicy
 
 /**
  * The Shuriken's NMEA serial port (CDC data interface). Reads the module's own NMEA and sends phone
@@ -36,9 +38,17 @@ class NmeaPort(private val conn: UsbDeviceConnection, private val dataIface: Usb
     reader = Thread({
       val assembler = NmeaLineAssembler()
       val buf = ByteArray(ep.maxPacketSize.coerceAtLeast(64) * 4)
+      val policy = ReadFailurePolicy(timeoutMs = READ_TIMEOUT_MS.toLong())
       while (running) {
+        val t0 = System.nanoTime()
         val n = conn.bulkTransfer(ep, buf, buf.size, READ_TIMEOUT_MS)
         if (n > 0) assembler.feed(buf, n).forEach(onLine)
+        // A read that fails at once means the device is gone: back off, and stop if it persists.
+        when (val action = policy.onResult(n, (System.nanoTime() - t0) / 1_000_000)) {
+          ReadAction.Continue -> Unit
+          is ReadAction.Sleep -> Thread.sleep(action.ms)
+          ReadAction.Stop -> break
+        }
       }
     }, "shuriken-nmea").apply { isDaemon = true; start() }
   }

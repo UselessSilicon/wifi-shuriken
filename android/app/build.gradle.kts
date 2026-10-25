@@ -20,13 +20,31 @@ android {
     applicationId = "com.wifishuriken.companion"
     minSdk = 33
     targetSdk = 37
-    versionCode = 2
-    versionName = "0.2.0"
+    versionCode = 3
+    versionName = "0.3.0"
+  }
+
+  // Release signing comes only from the builder's own ~/.gradle/gradle.properties (never committed):
+  // companionStoreFile, companionStorePassword, companionKeyAlias, companionKeyPassword.
+  // Without them the release APK is left unsigned (CI). Sign with the key of the installed app so a
+  // release updates it in place; a different key would force an uninstall and lose the app's data.
+  val releaseStore = providers.gradleProperty("companionStoreFile").orNull
+  signingConfigs {
+    if (releaseStore != null) {
+      create("owner") {
+        storeFile = file(releaseStore)
+        storePassword = providers.gradleProperty("companionStorePassword").get()
+        keyAlias = providers.gradleProperty("companionKeyAlias").get()
+        keyPassword = providers.gradleProperty("companionKeyPassword").get()
+      }
+    }
   }
 
   buildTypes {
     release {
+      // Not debuggable; no code shrinking (MapLibre and Room rely on reflection, and size is not a concern here).
       isMinifyEnabled = false
+      signingConfigs.findByName("owner")?.let { signingConfig = it }
     }
   }
 
@@ -51,6 +69,11 @@ android {
       )
     }
   }
+}
+
+// Room writes each schema version here; committed so future versions can be migrated and tested.
+ksp {
+  arg("room.schemaLocation", "$projectDir/schemas")
 }
 
 dependencies {
