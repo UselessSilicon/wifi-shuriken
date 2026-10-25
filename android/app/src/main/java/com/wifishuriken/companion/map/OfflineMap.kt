@@ -26,6 +26,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
+import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.sources.GeoJsonOptions
@@ -35,7 +36,11 @@ import org.maplibre.geojson.FeatureCollection
 import org.maplibre.geojson.LineString
 import org.maplibre.geojson.MultiLineString
 import org.maplibre.geojson.Point
+import org.maplibre.geojson.Polygon
 import java.io.File
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** Dot colours by security class (design §6). */
 val SECURITY_COLORS = mapOf(
@@ -93,6 +98,8 @@ fun OfflineMap(
   onNetworkClick: (String) -> Unit,
   /** More tracks drawn as separate lines (e.g. every drive on "All on map"). */
   extraTracks: List<List<TrackPoint>> = emptyList(),
+  /** Estimated position with its uncertainty circle (network detail). */
+  estimate: MapEstimate? = null,
 ) {
   val context = LocalContext.current
   val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -143,11 +150,19 @@ fun OfflineMap(
     )
   }
 
+  LaunchedEffect(style, estimate) {
+    val s = style ?: return@LaunchedEffect
+    (s.getSource("estimate") as? GeoJsonSource)?.setGeoJson(
+      estimate?.let { FeatureCollection.fromFeature(Feature.fromGeometry(circlePolygon(it))) } ?: FeatureCollection.fromFeatures(emptyList()),
+    )
+  }
+
   // Browsing maps fit the data once it is known; nothing is ever centred on a fixed place.
-  LaunchedEffect(map, followUser, track, extraTracks, networks) {
+  LaunchedEffect(map, followUser, track, extraTracks, networks, estimate) {
     val m = map ?: return@LaunchedEffect
     if (followUser) return@LaunchedEffect
-    val pts = track.map { it.lat to it.lon } + extraTracks.flatten().map { it.lat to it.lon } + networks.map { it.lat to it.lon }
+    val pts = track.map { it.lat to it.lon } + extraTracks.flatten().map { it.lat to it.lon } + networks.map { it.lat to it.lon } +
+      (estimate?.let { e -> circlePolygon(e).coordinates().first().map { it.latitude() to it.longitude() } } ?: emptyList())
     if (pts.isEmpty()) return@LaunchedEffect
     if (pts.size == 1 || pts.all { it == pts[0] }) {
       m.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(pts[0].first, pts[0].second), 15.0))
@@ -195,12 +210,29 @@ fun OfflineMap(
   AndroidView(factory = { mapView }, modifier = modifier)
 }
 
+/** A 64-point polygon approximating a circle of [MapEstimate.radiusM] metres around the estimate. */
+private fun circlePolygon(e: MapEstimate): Polygon {
+  val dLat = e.radiusM / 111_320.0
+  val dLon = dLat / maxOf(cos(Math.toRadians(e.lat)), 0.01)
+  val ring = (0..64).map { i ->
+    val a = 2 * PI * (i % 64) / 64
+    Point.fromLngLat(e.lon + dLon * sin(a), e.lat + dLat * cos(a))
+  }
+  return Polygon.fromLngLats(listOf(ring))
+}
+
 private fun addOverlay(s: Style) {
   val empty = FeatureCollection.fromFeatures(emptyList())
   s.addSource(GeoJsonSource("track", empty))
   s.addSource(GeoJsonSource("tracks-all", empty))
   s.addSource(GeoJsonSource("networks", empty, GeoJsonOptions().withCluster(true).withClusterMaxZoom(15).withClusterRadius(40)))
   s.addSource(GeoJsonSource("user", empty))
+  s.addSource(GeoJsonSource("estimate", empty))
+  s.addLayer(
+    FillLayer("estimate-fill", "estimate").withProperties(
+      PropertyFactory.fillColor("#2F7DF6"), PropertyFactory.fillOpacity(0.15f), PropertyFactory.fillOutlineColor("#2F7DF6"),
+    ),
+  )
   s.addLayer(
     LineLayer("tracks-all-line", "tracks-all").withProperties(
       PropertyFactory.lineColor("#FF7A00"), PropertyFactory.lineWidth(2.5f), PropertyFactory.lineOpacity(0.75f),

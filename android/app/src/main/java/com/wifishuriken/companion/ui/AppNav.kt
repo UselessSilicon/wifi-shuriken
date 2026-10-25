@@ -1,5 +1,6 @@
 package com.wifishuriken.companion.ui
 
+import android.net.Uri
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,6 +31,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.navArgument
 import com.wifishuriken.companion.ui.drives.DriveDetailScreen
 import com.wifishuriken.companion.ui.drives.DrivesScreen
+import com.wifishuriken.companion.ui.networks.NetworkDetailScreen
+import com.wifishuriken.companion.ui.networks.NetworksScreen
+import com.wifishuriken.companion.ui.networks.StatsScreen
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
@@ -81,7 +85,17 @@ fun CompanionApp(mapFile: File?, onConnect: () -> Unit, settingsExtras: @Composa
       composable(
         "networks?tripId={tripId}",
         arguments = listOf(navArgument("tripId") { type = NavType.LongType; defaultValue = -1L }),
-      ) { Placeholder("Networks") }
+      ) { entry ->
+        NetworksScreen(
+          tripId = entry.arguments!!.getLong("tripId").takeIf { it >= 0 },
+          onOpenNetwork = { nav.navigate("network/" + Uri.encode(it)) },
+          onOpenStats = { nav.navigate("stats?tripId=${it ?: -1}") },
+        )
+      }
+      composable("stats?tripId={tripId}", arguments = listOf(navArgument("tripId") { type = NavType.LongType; defaultValue = -1L })) { entry ->
+        StatsScreen(entry.arguments!!.getLong("tripId").takeIf { it >= 0 }, onOpenNetwork = { nav.navigate("network/" + Uri.encode(it)) })
+      }
+      composable("network/{mac}") { entry -> NetworkDetailScreen(entry.arguments!!.getString("mac")!!, mapFile) }
       composable("settings") { Column { Placeholder("Settings"); settingsExtras() } }
     }
   }
