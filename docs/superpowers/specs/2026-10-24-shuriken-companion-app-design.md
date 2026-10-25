@@ -213,6 +213,9 @@ number of drives; a sighting-by-sighting history.
 
 Map file (pick, replace, status), export database (for backup, via the system file
 picker), theme follows system, units. Nothing that uploads.
+An About section states that the app was written entirely by an AI (Claude, by
+Anthropic), not by the owner, and is unofficial (not affiliated with the WiFi-Shuriken
+project). No emoji anywhere in the UI (owner's rule, 2026-10-25).
 
 ## 7. Phone GPS feed
 
