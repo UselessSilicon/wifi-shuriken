@@ -2,3 +2,5 @@
 .vscode
 platformio.local.ini
 .claude
+.venv-pio/
+dist/
