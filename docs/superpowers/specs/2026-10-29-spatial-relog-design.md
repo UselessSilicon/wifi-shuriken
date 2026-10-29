@@ -5,7 +5,7 @@
 > one-off on the fork `UselessSilicon/wifi-shuriken`.
 
 - **Date:** 2026-10-29
-- **Status:** Design only, for owner review. No product code on this branch.
+- **Status:** Design agreed with the owner (section 12). No product code on this branch yet.
 - **Scope:** controller (RP2350) and scanner (ESP32-C5) firmware, native unit tests, docs.
 
 ## 1. Intent and why
@@ -228,8 +228,40 @@ long stop does not grow the log.
 - Gate key recomputed on core0 from `QueuedScanResult` via a shared helper; position from the logger's
   current GPS source; no locking (core0 only); gate reset called directly from the core0 fix-acquire hook.
 
-## 12. Questions only the owner can answer
+## 12. Owner decisions (2026-10-29)
 
-1. Accept 3 to 6 times larger logs (and WiGLE uploads) in exchange for better placement?
-2. Is reflashing the scanners as well as the controller acceptable? Without it the gate is inert.
-3. Should the feature ship enabled by default on this fork, or off (0/0) and enabled per build?
+1. **Larger logs: accepted**, on condition that nothing conflicts with WiGLE's rules. Findings: WiGLE
+   publishes no rule against several rows per network; its own Android app writes repeated observations of
+   a network as the device moves, and WiGLE staff describe duplicate uploads as safely ignored. Re-logged
+   rows here are genuine new observations (new time, new position or stronger signal), not copies, and
+   the CSV header and row format stay unchanged. Residual risk: WiGLE's policies are not formally
+   documented for this; if WiGLE ever objects, setting 0/0 restores current behaviour.
+2. **Reflashing scanners: accepted**, on condition of a safe, verified flash process (section 13).
+3. **On by default** in every build from this fork: 25 m / 6 dB, no build flags needed. The owner
+   wants to flash and keep driving as before, only with better data. Status/serial output must not
+   require any new action from the owner.
+
+## 13. Safe flash procedure (required before release)
+
+Facts from the code: scanner SD/SPI updates use the ESP32 `Update` library (write to the inactive
+partition, switch only after `Update.end(true)` succeeds, so a failed update keeps the old image); the
+controller stages the image from SD into LittleFS and applies it through the OTA bootloader with a
+CRC-checked command page (`src/controller_update_runtime.cpp`). Both chips have ROM recovery that no
+firmware can overwrite: RP2350 USB BOOTSEL (UF2) and ESP32-C5 USB download mode (merged image).
+
+Procedure the release must document (in the fork README section for this feature):
+
+1. Build `xiao_rp2350_controller` and `xiao_esp32c5_scanner` from the tagged commit; native tests green;
+   size report within limits; publish SHA-256 of `controller.bin`, `scanner.bin`, the UF2 and the
+   merged scanner image next to the files.
+2. Keep the currently installed release's images (SD and USB variants) as the rollback set.
+3. Bench first, not on a drive: copy `controller.bin` and `scanner.bin` to the SD card root, power on
+   with stable power, wait for both to be renamed `*.applied.bin`; confirm the new version string on the
+   USB serial status line and that every scanner slot reports the new version.
+4. Bench smoke test: a few minutes walking or idling with a fix; confirm rows are written, drop counters
+   stay at 0, and a stationary period does not grow the log.
+5. Rollback: copy the previous release's `controller.bin`/`scanner.bin` to the SD root the same way; if a
+   board will not boot, recover over USB (BOOTSEL + UF2 for the controller; download mode + merged image
+   for each scanner).
+6. Mixed versions (new controller, old scanners or the reverse) must keep logging exactly as today; the
+   implementation must be tested for that, so a partially applied update is never harmful.
