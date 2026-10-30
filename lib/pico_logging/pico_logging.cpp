@@ -630,6 +630,9 @@ void Logger::appendCsvRow(const QueuedScanResult& r) {
   const bool have_location =
       gps_ptr_->location.isValid() &&
       gps_ptr_->location.age() < config_.gps_field_max_age_ms;
+  const bool have_accuracy =
+      gps_ptr_->hdop.isValid() &&
+      gps_ptr_->hdop.age() < config_.gps_field_max_age_ms;
 
   // Re-log gate: a repeat sighting is written only on first sight, when a fix
   // arrives for a positionless entry, after moving, or when clearly stronger.
@@ -646,8 +649,15 @@ void Logger::appendCsvRow(const QueuedScanResult& r) {
       lat_e7 = (int32_t)lround(gps_ptr_->location.lat() * 1e7);
       lon_e7 = (int32_t)lround(gps_ptr_->location.lng() * 1e7);
     }
+    // Same accuracy as the AccuracyMeters column (HDOP x 5 m); 0 when unknown.
+    uint16_t accuracy_m = 0;
+    if (have_accuracy) {
+      const double acc = gps_ptr_->hdop.hdop() * 5.0;
+      accuracy_m = acc >= 65535.0 ? (uint16_t)65535 : (uint16_t)lround(acc);
+    }
     const RelogDecision decision = relogGateDecide(relog_gate_, key, have_location,
-                                                   lat_e7, lon_e7, r.rssi, *relog_cfg_);
+                                                   lat_e7, lon_e7, r.rssi, accuracy_m,
+                                                   *relog_cfg_);
     if (decision == RelogDecision::Suppress) {
       state_.relog_suppressed++;
       return;
@@ -659,9 +669,6 @@ void Logger::appendCsvRow(const QueuedScanResult& r) {
   const bool have_altitude =
       gps_ptr_->altitude.isValid() &&
       gps_ptr_->altitude.age() < config_.gps_field_max_age_ms;
-  const bool have_accuracy =
-      gps_ptr_->hdop.isValid() &&
-      gps_ptr_->hdop.age() < config_.gps_field_max_age_ms;
 
   if (have_location) {
     snprintf(lat_csv, sizeof(lat_csv), "%.7f", gps_ptr_->location.lat());

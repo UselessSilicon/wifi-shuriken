@@ -49,7 +49,7 @@ static void store(RelogGateEntry& e, bool has_pos, int32_t lat_e7, int32_t lon_e
 }
 
 static bool movedAtLeast(const RelogGateEntry& e, int32_t lat_e7, int32_t lon_e7,
-                         uint16_t distance_m) {
+                         uint32_t distance_m) {
   const float meters_per_deg = 111320.0f;
   const float dlat_deg = (float)(lat_e7 - e.lat_e7) * 1e-7f;
   int64_t dlon_e7 = (int64_t)lon_e7 - (int64_t)e.lon_e7;
@@ -82,7 +82,7 @@ void relogGateReset(RelogGate* gate) {
 
 RelogDecision relogGateDecide(RelogGate* gate, const WiFiDedupeHash& key, bool has_pos,
                               int32_t lat_e7, int32_t lon_e7, int8_t rssi,
-                              const RelogGateConfig& cfg) {
+                              uint16_t accuracy_m, const RelogGateConfig& cfg) {
   const uint16_t found = findSlot(gate, key);
   if (found == gate->table_size) {
     uint16_t idx;
@@ -110,8 +110,11 @@ RelogDecision relogGateDecide(RelogGate* gate, const WiFiDedupeHash& key, bool h
     store(e, true, lat_e7, lon_e7, rssi);
     return RelogDecision::LogFixArrived;
   }
+  uint32_t threshold_m = cfg.distance_m;
+  const uint32_t accuracy_floor_m = (uint32_t)cfg.accuracy_factor * (uint32_t)accuracy_m;
+  if (accuracy_floor_m > threshold_m) threshold_m = accuracy_floor_m;
   if (has_pos && e.has_pos && cfg.distance_m > 0 &&
-      movedAtLeast(e, lat_e7, lon_e7, cfg.distance_m)) {
+      movedAtLeast(e, lat_e7, lon_e7, threshold_m)) {
     store(e, true, lat_e7, lon_e7, rssi);
     return RelogDecision::LogMoved;
   }

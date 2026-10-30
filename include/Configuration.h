@@ -264,6 +264,10 @@
 #ifndef RELOG_RSSI_GAIN_DB
 #define RELOG_RSSI_GAIN_DB 6
 #endif
+// Spatial re-log: distance rule needs at least this many times the fix accuracy (HDOP x 5 m); 0 = ignore accuracy.
+#ifndef RELOG_ACCURACY_FACTOR
+#define RELOG_ACCURACY_FACTOR 2
+#endif
 // Spatial re-log: maximum number of APs tracked by the re-log gate.
 #ifndef RELOG_GATE_CAPACITY
 #define RELOG_GATE_CAPACITY 4000

@@ -94,7 +94,8 @@ static WiFiDedupeTable master_dedupe_table = {};
 static RelogGateEntry relog_gate_entries[RELOG_GATE_CAPACITY];
 static uint16_t relog_gate_slots[RELOG_GATE_TABLE_SIZE];
 static RelogGate relog_gate = {};
-static const RelogGateConfig relog_gate_config = {RELOG_DISTANCE_M, RELOG_RSSI_GAIN_DB};
+static const RelogGateConfig relog_gate_config = {RELOG_DISTANCE_M, RELOG_RSSI_GAIN_DB,
+                                                  RELOG_ACCURACY_FACTOR};
 #endif
 
 // SD/logging retry policy remains owned by controller_main.cpp because the

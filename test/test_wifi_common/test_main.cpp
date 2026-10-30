@@ -510,7 +510,7 @@ void test_wifiDedupeHash_fields_matches_result() {
 // ---- Relog gate ----
 
 static constexpr int32_t RG_BASE = 10000000;  // synthetic 1.0 deg
-static const RelogGateConfig RG_CFG = {25, 6};
+static const RelogGateConfig RG_CFG = {25, 6, 2};
 
 struct RgFixture {
   RelogGateEntry entries[8];
@@ -531,12 +531,17 @@ static WiFiDedupeHash rgKey(uint8_t n) {
 
 static RelogDecision rgAt(RgFixture& f, uint8_t n, int32_t lat, int32_t lon, int8_t rssi,
                           const RelogGateConfig& cfg = RG_CFG) {
-  return relogGateDecide(&f.gate, rgKey(n), true, lat, lon, rssi, cfg);
+  return relogGateDecide(&f.gate, rgKey(n), true, lat, lon, rssi, 0, cfg);
+}
+
+static RelogDecision rgAtAcc(RgFixture& f, uint8_t n, int32_t lat, int32_t lon, int8_t rssi,
+                             uint16_t accuracy_m, const RelogGateConfig& cfg = RG_CFG) {
+  return relogGateDecide(&f.gate, rgKey(n), true, lat, lon, rssi, accuracy_m, cfg);
 }
 
 static RelogDecision rgNoPos(RgFixture& f, uint8_t n, int8_t rssi,
                              const RelogGateConfig& cfg = RG_CFG) {
-  return relogGateDecide(&f.gate, rgKey(n), false, 0, 0, rssi, cfg);
+  return relogGateDecide(&f.gate, rgKey(n), false, 0, 0, rssi, 0, cfg);
 }
 
 void test_relogGate_first_sight_logs() {
@@ -597,7 +602,7 @@ void test_relogGate_eviction_relogs_as_first_sight() {
 
 void test_relogGate_zero_zero_disables() {
   RgFixture f;
-  const RelogGateConfig off = {0, 0};
+  const RelogGateConfig off = {0, 0, 0};
   TEST_ASSERT_TRUE(rgNoPos(f, 1, -70, off) == RelogDecision::LogFirstSight);
   TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, RG_BASE, -70, off) == RelogDecision::Suppress);
   TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE + 89800, RG_BASE, -70, off) == RelogDecision::Suppress);
@@ -667,6 +672,51 @@ void test_relogGate_churn_keeps_slot_table_consistent() {
   TEST_ASSERT_TRUE(rgAt(f, 10, RG_BASE, RG_BASE, -70) == RelogDecision::LogFirstSight);
 }
 
+// Parked under poor sky: HDOP 5 (25 m) and positions wandering inside a 40 m x
+// 20 m box next to the centre, so no two samples are 50 m apart.
+void test_relogGate_parked_gps_drift_bounded() {
+  RgFixture f;
+  int logs = 0;
+  uint32_t lcg = 12345u;
+  for (int i = 0; i < 1000; i++) {
+    lcg = lcg * 1103515245u + 12345u;
+    const int32_t north_m = (int32_t)((lcg >> 8) % 41u);
+    const int32_t east_m = (int32_t)((lcg >> 20) % 21u);
+    // About 89 units of 1e-7 degree per metre near 1.0 deg.
+    const int32_t lat = RG_BASE + north_m * 89;
+    const int32_t lon = RG_BASE + east_m * 89;
+    if (rgAtAcc(f, 1, lat, lon, -70, 25) != RelogDecision::Suppress) logs++;
+  }
+  TEST_ASSERT_TRUE(logs <= 3);
+}
+
+void test_relogGate_poor_accuracy_raises_distance() {
+  RgFixture f;
+  rgAtAcc(f, 1, RG_BASE, RG_BASE, -70, 25);
+  TEST_ASSERT_TRUE(rgAtAcc(f, 1, RG_BASE + 3593, RG_BASE, -70, 25) == RelogDecision::Suppress);
+  TEST_ASSERT_TRUE(rgAtAcc(f, 1, RG_BASE + 4582, RG_BASE, -70, 25) == RelogDecision::LogMoved);
+}
+
+void test_relogGate_good_accuracy_keeps_25m() {
+  RgFixture f;
+  rgAtAcc(f, 1, RG_BASE, RG_BASE, -70, 5);
+  TEST_ASSERT_TRUE(rgAtAcc(f, 1, RG_BASE + 2255, RG_BASE, -70, 5) == RelogDecision::LogMoved);
+}
+
+void test_relogGate_unknown_accuracy_plain_distance() {
+  RgFixture f;
+  rgAtAcc(f, 1, RG_BASE, RG_BASE, -70, 0);
+  TEST_ASSERT_TRUE(rgAtAcc(f, 1, RG_BASE + 2255, RG_BASE, -70, 0) == RelogDecision::LogMoved);
+}
+
+void test_relogGate_accuracy_factor_zero_ignores_accuracy() {
+  RgFixture f;
+  const RelogGateConfig no_acc = {25, 6, 0};
+  rgAtAcc(f, 1, RG_BASE, RG_BASE, -70, 25, no_acc);
+  TEST_ASSERT_TRUE(rgAtAcc(f, 1, RG_BASE + 2255, RG_BASE, -70, 25, no_acc) ==
+                   RelogDecision::LogMoved);
+}
+
 // Synthetic drive: one AP heard every 500 ms for 20 s, moving 5 m north per
 // sample with RSSI rising 1 dB per sample. Scanner table, controller table,
 // then (optionally) the re-log gate. Returns the number of resulting rows.
@@ -685,7 +735,7 @@ static uint32_t simulateDriveRows(uint32_t scanner_ttl, uint32_t controller_ttl,
   uint16_t g_slots[8];
   RelogGate gate;
   relogGateInit(&gate, g_entries, 4, g_slots, 8);
-  const RelogGateConfig cfg = {25, 6};
+  const RelogGateConfig cfg = {25, 6, 2};
 
   const uint8_t bssid[6] = {0x00, 0x00, 0x5E, 0x00, 0x53, 0x01};
   WiFiDedupeHash key;
@@ -701,7 +751,7 @@ static uint32_t simulateDriveRows(uint32_t scanner_ttl, uint32_t controller_ttl,
     if (!wifiDedupeTableRememberAt(&scanner, &key, now)) continue;
     if (!wifiDedupeTableRememberAt(&controller, &key, now)) continue;
     if (gate_on) {
-      if (relogGateDecide(&gate, key, true, lat_e7, lon_e7, rssi, cfg) ==
+      if (relogGateDecide(&gate, key, true, lat_e7, lon_e7, rssi, 0, cfg) ==
           RelogDecision::Suppress) {
         continue;
       }
@@ -780,6 +830,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_relogGate_antimeridian_wrap);
   RUN_TEST(test_relogGate_rssi_no_overflow);
   RUN_TEST(test_relogGate_churn_keeps_slot_table_consistent);
+  RUN_TEST(test_relogGate_parked_gps_drift_bounded);
+  RUN_TEST(test_relogGate_poor_accuracy_raises_distance);
+  RUN_TEST(test_relogGate_good_accuracy_keeps_25m);
+  RUN_TEST(test_relogGate_unknown_accuracy_plain_distance);
+  RUN_TEST(test_relogGate_accuracy_factor_zero_ignores_accuracy);
   RUN_TEST(test_relogPipeline_today_one_row);
   RUN_TEST(test_relogPipeline_new_controller_old_scanner);
   RUN_TEST(test_relogPipeline_old_controller_new_scanner);
