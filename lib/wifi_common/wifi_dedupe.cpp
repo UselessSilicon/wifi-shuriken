@@ -4,20 +4,22 @@
 #include <string.h>
 #include <xxhash.h>
 
-void wifiDedupeHashFromResult(const WiFiResult& result, WiFiDedupeHash& out) {
+void wifiDedupeHashFromFields(const char* ssid33, const uint8_t* bssid6,
+                              uint8_t channel, uint8_t band, uint16_t capabilities,
+                              WiFiDedupeHash& out) {
   uint8_t material[43] = {};
   size_t offset = 0;
 
-  memcpy(material + offset, result.ssid, sizeof(result.ssid));
-  offset += sizeof(result.ssid);
+  memcpy(material + offset, ssid33, 33);
+  offset += 33;
 
-  memcpy(material + offset, result.bssid, sizeof(result.bssid));
-  offset += sizeof(result.bssid);
+  memcpy(material + offset, bssid6, 6);
+  offset += 6;
 
-  material[offset++] = result.channel;
-  material[offset++] = result.band;
-  material[offset++] = (uint8_t)(result.capabilities & 0xFF);
-  material[offset++] = (uint8_t)((result.capabilities >> 8) & 0xFF);
+  material[offset++] = channel;
+  material[offset++] = band;
+  material[offset++] = (uint8_t)(capabilities & 0xFF);
+  material[offset++] = (uint8_t)((capabilities >> 8) & 0xFF);
 
 #if WIFI_DEDUPE_HASH_BITS == 32
   const XXH32_hash_t hash = XXH32(material, sizeof(material), 0);
@@ -35,6 +37,11 @@ void wifiDedupeHashFromResult(const WiFiResult& result, WiFiDedupeHash& out) {
   XXH128_canonicalFromHash(&canonical, hash);
   memcpy(out.bytes, canonical.digest, WIFI_DEDUPE_HASH_SIZE);
 #endif
+}
+
+void wifiDedupeHashFromResult(const WiFiResult& result, WiFiDedupeHash& out) {
+  wifiDedupeHashFromFields(result.ssid, result.bssid, result.channel,
+                           result.band, result.capabilities, out);
 }
 
 bool wifiDedupeHashEquals(const WiFiDedupeHash& a, const WiFiDedupeHash& b) {
@@ -81,6 +88,35 @@ static void backwardShiftDelete(WiFiDedupeHash* slots,
   }
 }
 
+// Evicts the oldest live entry. Pops FIFO heads (skipping stale ones) until a
+// live entry is found and removed; returns false if none was found.
+static bool evictFifoHead(WiFiDedupeTable* table) {
+  const uint16_t mask = (uint16_t)(table->table_size - 1u);
+  for (uint16_t attempts = 0; attempts < table->capacity; attempts++) {
+    // Retrieve the oldest hash from the FIFO, locate its current slot via a
+    // fresh probe (O(1) expected), then backward-shift delete.
+    const WiFiDedupeHash evict_hash = table->fifo[table->fifo_head];
+    table->fifo_head = (uint16_t)((table->fifo_head + 1u) % table->capacity);
+
+    if (slotIsEmpty(&evict_hash)) {
+      continue;
+    }
+
+    uint16_t evict_slot = hashToSlot(&evict_hash, table->table_size);
+    while (!slotIsEmpty(&table->slots[evict_slot])) {
+      if (memcmp(table->slots[evict_slot].bytes,
+                 evict_hash.bytes,
+                 WIFI_DEDUPE_HASH_SIZE) == 0) {
+        backwardShiftDelete(table->slots, table->table_size, evict_slot);
+        table->count--;
+        return true;
+      }
+      evict_slot = (uint16_t)((evict_slot + 1u) & mask);
+    }
+  }
+  return false;
+}
+
 void wifiDedupeTableInit(WiFiDedupeTable* table,
                          WiFiDedupeHash* slots, uint16_t table_size,
                          WiFiDedupeHash* fifo, uint16_t capacity) {
@@ -92,9 +128,21 @@ void wifiDedupeTableInit(WiFiDedupeTable* table,
   table->count = 0;
   table->fifo_head = 0;
   table->fifo_tail = 0;
+  table->fifo_ms = nullptr;
+  table->ttl_ms = 0;
   if (slots && table_size > 0) {
     memset(slots, 0, (size_t)table_size * sizeof(WiFiDedupeHash));
   }
+}
+
+void wifiDedupeTableInitTtl(WiFiDedupeTable* table,
+                            WiFiDedupeHash* slots, uint16_t table_size,
+                            WiFiDedupeHash* fifo, uint32_t* fifo_ms,
+                            uint16_t capacity, uint32_t ttl_ms) {
+  wifiDedupeTableInit(table, slots, table_size, fifo, capacity);
+  if (!table) return;
+  table->fifo_ms = fifo_ms;
+  table->ttl_ms = ttl_ms;
 }
 
 void wifiDedupeTableReset(WiFiDedupeTable* table) {
@@ -123,7 +171,10 @@ bool wifiDedupeTableContains(const WiFiDedupeTable* table,
   return false;
 }
 
-bool wifiDedupeTableRemember(WiFiDedupeTable* table, const WiFiDedupeHash* hash) {
+// Shared insert path. When use_time is set, entries older than ttl_ms are
+// expired first and the insert time is recorded.
+static bool rememberImpl(WiFiDedupeTable* table, const WiFiDedupeHash* hash,
+                         bool use_time, uint32_t now_ms) {
   if (!table || !hash || !table->slots || !table->fifo ||
       table->table_size == 0 || table->capacity == 0) {
     return false;
@@ -136,41 +187,22 @@ bool wifiDedupeTableRemember(WiFiDedupeTable* table, const WiFiDedupeHash* hash)
   if (table->fifo_head >= table->capacity) table->fifo_head = 0;
   if (table->fifo_tail >= table->capacity) table->fifo_tail = 0;
 
+  if (use_time && table->ttl_ms != 0 && table->fifo_ms) {
+    while (table->count > 0 &&
+           (uint32_t)(now_ms - table->fifo_ms[table->fifo_head]) >= table->ttl_ms) {
+      if (!evictFifoHead(table)) {
+        wifiDedupeTableReset(table);
+        break;
+      }
+    }
+  }
+
   if (wifiDedupeTableContains(table, hash)) return false;
 
   const uint16_t mask = (uint16_t)(table->table_size - 1u);
 
   if (table->count == table->capacity) {
-    bool evicted = false;
-    for (uint16_t attempts = 0; attempts < table->capacity; attempts++) {
-      // Evict the oldest entry: retrieve its hash from the FIFO, locate its
-      // current slot via a fresh probe (O(1) expected), then backward-shift delete.
-      const WiFiDedupeHash evict_hash = table->fifo[table->fifo_head];
-      table->fifo_head = (uint16_t)((table->fifo_head + 1u) % table->capacity);
-
-      if (slotIsEmpty(&evict_hash)) {
-        continue;
-      }
-
-      uint16_t evict_slot = hashToSlot(&evict_hash, table->table_size);
-      while (!slotIsEmpty(&table->slots[evict_slot])) {
-        if (memcmp(table->slots[evict_slot].bytes,
-                   evict_hash.bytes,
-                   WIFI_DEDUPE_HASH_SIZE) == 0) {
-          backwardShiftDelete(table->slots, table->table_size, evict_slot);
-          table->count--;
-          evicted = true;
-          break;
-        }
-        evict_slot = (uint16_t)((evict_slot + 1u) & mask);
-      }
-
-      if (evicted) {
-        break;
-      }
-    }
-
-    if (!evicted) {
+    if (!evictFifoHead(table)) {
       // FIFO metadata no longer references any live table entry. Drop stale
       // dedupe state so the table can recover to a known-good configuration.
       wifiDedupeTableReset(table);
@@ -185,7 +217,17 @@ bool wifiDedupeTableRemember(WiFiDedupeTable* table, const WiFiDedupeHash* hash)
 
   table->slots[insert_slot] = *hash;
   table->fifo[table->fifo_tail] = *hash;
+  if (use_time && table->fifo_ms) table->fifo_ms[table->fifo_tail] = now_ms;
   table->fifo_tail = (uint16_t)((table->fifo_tail + 1u) % table->capacity);
   table->count++;
   return true;
+}
+
+bool wifiDedupeTableRemember(WiFiDedupeTable* table, const WiFiDedupeHash* hash) {
+  return rememberImpl(table, hash, false, 0);
+}
+
+bool wifiDedupeTableRememberAt(WiFiDedupeTable* table, const WiFiDedupeHash* hash,
+                               uint32_t now_ms) {
+  return rememberImpl(table, hash, true, now_ms);
 }

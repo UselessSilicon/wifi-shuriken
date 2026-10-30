@@ -49,19 +49,39 @@ struct WiFiDedupeTable {
   uint16_t count;             // current live entries
   uint16_t fifo_head;         // oldest entry (next to evict)
   uint16_t fifo_tail;         // next write position in fifo
+  uint32_t* fifo_ms;          // insertion time per fifo entry, or nullptr
+  uint32_t ttl_ms;            // entry lifetime in ms; 0 = never expires
 };
 
 // xxHash of WiFiResult fields except RSSI:
 // ssid[33], bssid[6], channel, band, capabilities.
 void wifiDedupeHashFromResult(const WiFiResult& result, WiFiDedupeHash& out);
 
+// Same hash as wifiDedupeHashFromResult, from the individual fields.
+// ssid33 points at 33 bytes, bssid6 at 6 bytes.
+void wifiDedupeHashFromFields(const char* ssid33, const uint8_t* bssid6,
+                              uint8_t channel, uint8_t band, uint16_t capabilities,
+                              WiFiDedupeHash& out);
+
 bool wifiDedupeHashEquals(const WiFiDedupeHash& a, const WiFiDedupeHash& b);
 
 void wifiDedupeTableInit(WiFiDedupeTable* table,
                          WiFiDedupeHash* slots, uint16_t table_size,
                          WiFiDedupeHash* fifo, uint16_t capacity);
+// Like wifiDedupeTableInit, but entries expire ttl_ms after insertion when
+// remembered via wifiDedupeTableRememberAt. fifo_ms has capacity entries.
+void wifiDedupeTableInitTtl(WiFiDedupeTable* table,
+                            WiFiDedupeHash* slots, uint16_t table_size,
+                            WiFiDedupeHash* fifo, uint32_t* fifo_ms,
+                            uint16_t capacity, uint32_t ttl_ms);
 void wifiDedupeTableReset(WiFiDedupeTable* table);
 bool wifiDedupeTableContains(const WiFiDedupeTable* table, const WiFiDedupeHash* hash);
 
 // Returns true when inserted as new, false when duplicate (or invalid table).
 bool wifiDedupeTableRemember(WiFiDedupeTable* table, const WiFiDedupeHash* hash);
+
+// Like wifiDedupeTableRemember, but first expires entries older than ttl_ms
+// (wrap-safe against a 32-bit millisecond clock). A hit does not refresh the
+// entry's time.
+bool wifiDedupeTableRememberAt(WiFiDedupeTable* table, const WiFiDedupeHash* hash,
+                               uint32_t now_ms);

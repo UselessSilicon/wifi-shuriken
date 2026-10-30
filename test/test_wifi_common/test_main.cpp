@@ -427,6 +427,85 @@ void test_wifiDedupeTable_evicted_entry_can_be_reinserted() {
   TEST_ASSERT_TRUE(wifiDedupeTableContains(&table, &h1));
 }
 
+// Helper: capacity 4, size 8 table with a time-to-live.
+static void initTtlTable(WiFiDedupeTable* table,
+                         WiFiDedupeHash* slots, WiFiDedupeHash* fifo,
+                         uint32_t* fifo_ms, uint32_t ttl_ms) {
+  wifiDedupeTableInitTtl(table, slots, 8, fifo, fifo_ms, 4, ttl_ms);
+}
+
+void test_wifiDedupeTable_ttl_expires_entry() {
+  WiFiDedupeTable table;
+  WiFiDedupeHash slots[8];
+  WiFiDedupeHash fifo[4];
+  uint32_t fifo_ms[4];
+  initTtlTable(&table, slots, fifo, fifo_ms, 1000);
+  const WiFiDedupeHash h = makeHash(5);
+
+  TEST_ASSERT_TRUE(wifiDedupeTableRememberAt(&table, &h, 0));
+  TEST_ASSERT_FALSE(wifiDedupeTableRememberAt(&table, &h, 999));
+  TEST_ASSERT_TRUE(wifiDedupeTableRememberAt(&table, &h, 1000));
+}
+
+void test_wifiDedupeTable_ttl_zero_never_expires() {
+  WiFiDedupeTable table;
+  WiFiDedupeHash slots[8];
+  WiFiDedupeHash fifo[4];
+  uint32_t fifo_ms[4];
+  initTtlTable(&table, slots, fifo, fifo_ms, 0);
+  const WiFiDedupeHash h = makeHash(5);
+
+  TEST_ASSERT_TRUE(wifiDedupeTableRememberAt(&table, &h, 0));
+  TEST_ASSERT_FALSE(wifiDedupeTableRememberAt(&table, &h, 1000000));
+}
+
+void test_wifiDedupeTable_hit_does_not_refresh_ttl() {
+  WiFiDedupeTable table;
+  WiFiDedupeHash slots[8];
+  WiFiDedupeHash fifo[4];
+  uint32_t fifo_ms[4];
+  initTtlTable(&table, slots, fifo, fifo_ms, 1000);
+  const WiFiDedupeHash h = makeHash(5);
+
+  TEST_ASSERT_TRUE(wifiDedupeTableRememberAt(&table, &h, 0));
+  TEST_ASSERT_FALSE(wifiDedupeTableRememberAt(&table, &h, 600));
+  TEST_ASSERT_TRUE(wifiDedupeTableRememberAt(&table, &h, 1000));
+}
+
+void test_wifiDedupeTable_millis_wraparound() {
+  WiFiDedupeTable table;
+  WiFiDedupeHash slots[8];
+  WiFiDedupeHash fifo[4];
+  uint32_t fifo_ms[4];
+  initTtlTable(&table, slots, fifo, fifo_ms, 1000);
+  const WiFiDedupeHash h = makeHash(5);
+
+  TEST_ASSERT_TRUE(wifiDedupeTableRememberAt(&table, &h, 0xFFFFFF00u));
+  TEST_ASSERT_FALSE(wifiDedupeTableRememberAt(&table, &h, 0x000002E7u));
+  TEST_ASSERT_TRUE(wifiDedupeTableRememberAt(&table, &h, 0x000002E8u));
+}
+
+void test_wifiDedupeTable_remember_without_time_never_expires() {
+  WiFiDedupeTable table;
+  WiFiDedupeHash slots[8];
+  WiFiDedupeHash fifo[4];
+  uint32_t fifo_ms[4];
+  initTtlTable(&table, slots, fifo, fifo_ms, 1000);
+  const WiFiDedupeHash h = makeHash(5);
+
+  TEST_ASSERT_TRUE(wifiDedupeTableRemember(&table, &h));
+  TEST_ASSERT_FALSE(wifiDedupeTableRemember(&table, &h));
+}
+
+void test_wifiDedupeHash_fields_matches_result() {
+  const WiFiResult r = makeValidResult();
+  WiFiDedupeHash from_result = {};
+  WiFiDedupeHash from_fields = {};
+  wifiDedupeHashFromResult(r, from_result);
+  wifiDedupeHashFromFields(r.ssid, r.bssid, r.channel, r.band, r.capabilities, from_fields);
+  TEST_ASSERT_TRUE(wifiDedupeHashEquals(from_result, from_fields));
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -451,5 +530,11 @@ int main(int argc, char** argv) {
   RUN_TEST(test_wifiDedupeTable_collision_probe_chain);
   RUN_TEST(test_wifiDedupeTable_many_insertions_keep_only_most_recent_entries);
   RUN_TEST(test_wifiDedupeTable_evicted_entry_can_be_reinserted);
+  RUN_TEST(test_wifiDedupeTable_ttl_expires_entry);
+  RUN_TEST(test_wifiDedupeTable_ttl_zero_never_expires);
+  RUN_TEST(test_wifiDedupeTable_hit_does_not_refresh_ttl);
+  RUN_TEST(test_wifiDedupeTable_millis_wraparound);
+  RUN_TEST(test_wifiDedupeTable_remember_without_time_never_expires);
+  RUN_TEST(test_wifiDedupeHash_fields_matches_result);
   return UNITY_END();
 }
