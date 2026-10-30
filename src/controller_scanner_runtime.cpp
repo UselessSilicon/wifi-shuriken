@@ -1352,7 +1352,7 @@ static void processScannerSlot(uint8_t slot,
       wifiDedupeHashFromResult(pkt.result, hash);
       // Controller-side dedupe suppresses duplicates across all scanners, not
       // just within the reporting slot.
-      if (!wifiDedupeTableRemember(scanner_runtime_context.master_dedupe_table, &hash)) {
+      if (!wifiDedupeTableRememberAt(scanner_runtime_context.master_dedupe_table, &hash, millis())) {
         (*scanner_runtime_context.dedupe_drops)++;
         batch_dedupe_hits++;
 #if LOG_DEDUPE_HITS

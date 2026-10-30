@@ -16,6 +16,7 @@
 #include <stdarg.h>
 #include "pico_logging.h"
 #include "wifi_dedupe.h"
+#include "wifi_relog_gate.h"
 #include "Configuration.h"
 #include "controller_gnss_runtime.h"
 #include "controller_mtp_storage.h"
@@ -79,11 +80,22 @@ class NonBlockingConsoleStream : public Stream {
 static NonBlockingConsoleStream nonblocking_console;
 
 // Controller-wide dedupe storage used to suppress duplicate results arriving
-// from different scanner slots during the same operating session.
+// from different scanner slots. Entries expire after CONTROLLER_DEDUPE_TTL_MS
+// (0 = never) so the re-log gate on core0 sees later repeats.
 static constexpr uint16_t MASTER_DEDUPE_CAPACITY = WIFI_DEDUPE_TABLE_CAPACITY;
 static WiFiDedupeHash master_dedupe_slots[WIFI_DEDUPE_TABLE_SIZE];
 static WiFiDedupeHash master_dedupe_fifo[MASTER_DEDUPE_CAPACITY];
+static uint32_t master_dedupe_fifo_ms[MASTER_DEDUPE_CAPACITY];
 static WiFiDedupeTable master_dedupe_table = {};
+
+#if RELOG_GATE_ENABLED
+// Spatial re-log gate consulted at SD write time. Owned and used by core0 only,
+// so it needs no locking.
+static RelogGateEntry relog_gate_entries[RELOG_GATE_CAPACITY];
+static uint16_t relog_gate_slots[RELOG_GATE_TABLE_SIZE];
+static RelogGate relog_gate = {};
+static const RelogGateConfig relog_gate_config = {RELOG_DISTANCE_M, RELOG_RSSI_GAIN_DB};
+#endif
 
 // SD/logging retry policy remains owned by controller_main.cpp because the
 // logging subsystem still lives here.
@@ -211,14 +223,18 @@ static void handleResetButton() {
 static void serialPrintRuntimeStatus() {
   // Periodic status combines queue health, logging totals, and scanner sweep
   // timing so field tuning can be done from one summary line.
-  serialPrintfNormalized("Queue drops=%lu serial_drop=%lu dedupe_drop=%lu logged=%lu blank_gps=%lu sweeps=%lu last_sweep_ms=%lu\n",
+  // dedupe_drop counts repeats inside the controller dedupe TTL window;
+  // relog_supp counts later repeats the re-log gate kept off the SD card.
+  serialPrintfNormalized("Queue drops=%lu serial_drop=%lu dedupe_drop=%lu logged=%lu blank_gps=%lu sweeps=%lu last_sweep_ms=%lu relog=%lu relog_supp=%lu\n",
                          (unsigned long)scan_queue_drops,
                          (unsigned long)serial_msg_drops,
                          (unsigned long)dedupe_drops,
                          (unsigned long)logging_state.csv_rows,
                          (unsigned long)logging_state.csv_rows_blank_gps,
                          (unsigned long)sweep_cycles_completed,
-                         (unsigned long)last_full_sweep_ms);
+                         (unsigned long)last_full_sweep_ms,
+                         (unsigned long)logging_state.relog_rows,
+                         (unsigned long)logging_state.relog_suppressed);
 }
 
 static void reportScannerDropCounters() {
@@ -284,6 +300,9 @@ static void maybeRequestDedupeResetOnFixAcquire(bool usable_fix) {
   }
 
   controllerScannerRuntimeRequestDedupeReset();
+#if RELOG_GATE_ENABLED
+  relogGateReset(&relog_gate);
+#endif
   last_reset_request_ms = now;
   reset_requested_once = true;
   serialPrintfNormalized("GNSS usable fix acquired; requested dedupe reset (cooldown=%lums)\n",
@@ -386,10 +405,16 @@ void setup() {
   // is busy with SD or GNSS work.
   queue_init(&scan_result_queue, sizeof(QueuedScanResult), SCAN_RESULT_QUEUE_DEPTH);
   queue_init(&serial_msg_queue, sizeof(QueuedSerialMsg), SERIAL_MSG_QUEUE_DEPTH);
-  wifiDedupeTableInit(&master_dedupe_table,
-                      master_dedupe_slots, WIFI_DEDUPE_TABLE_SIZE,
-                      master_dedupe_fifo, MASTER_DEDUPE_CAPACITY);
+  wifiDedupeTableInitTtl(&master_dedupe_table,
+                         master_dedupe_slots, WIFI_DEDUPE_TABLE_SIZE,
+                         master_dedupe_fifo, master_dedupe_fifo_ms, MASTER_DEDUPE_CAPACITY,
+                         CONTROLLER_DEDUPE_TTL_MS);
   wifiDedupeTableReset(&master_dedupe_table);
+#if RELOG_GATE_ENABLED
+  relogGateInit(&relog_gate, relog_gate_entries, RELOG_GATE_CAPACITY,
+                relog_gate_slots, RELOG_GATE_TABLE_SIZE);
+  logging.setRelogGate(&relog_gate, &relog_gate_config);
+#endif
 
   // Initialize SPI1 for scanner communication
   controllerScannerRuntimeInitBus();

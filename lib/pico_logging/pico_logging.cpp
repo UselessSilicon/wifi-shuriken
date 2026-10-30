@@ -3,6 +3,7 @@
 
 #include <SPI.h>
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,6 +95,11 @@ Logger::Logger(SdFat& sd,
 
 void Logger::setGpsSource(TinyGPSPlus* gps) {
   gps_ptr_ = gps;
+}
+
+void Logger::setRelogGate(RelogGate* gate, const RelogGateConfig* cfg) {
+  relog_gate_ = (gate != nullptr && cfg != nullptr) ? gate : nullptr;
+  relog_cfg_ = relog_gate_ != nullptr ? cfg : nullptr;
 }
 
 void Logger::initUtcTimezone() {
@@ -624,6 +630,32 @@ void Logger::appendCsvRow(const QueuedScanResult& r) {
   const bool have_location =
       gps_ptr_->location.isValid() &&
       gps_ptr_->location.age() < config_.gps_field_max_age_ms;
+
+  // Re-log gate: a repeat sighting is written only on first sight, when a fix
+  // arrives for a positionless entry, after moving, or when clearly stronger.
+  // Suppressed repeats leave every row counter untouched. Compiled out when the
+  // gate is disabled so that build's row path is unchanged.
+  bool relog_row = false;
+#if RELOG_GATE_ENABLED
+  if (relog_gate_ != nullptr) {
+    WiFiDedupeHash key = {};
+    wifiDedupeHashFromFields(r.ssid, r.bssid, r.channel, r.band, r.capabilities, key);
+    int32_t lat_e7 = 0;
+    int32_t lon_e7 = 0;
+    if (have_location) {
+      lat_e7 = (int32_t)lround(gps_ptr_->location.lat() * 1e7);
+      lon_e7 = (int32_t)lround(gps_ptr_->location.lng() * 1e7);
+    }
+    const RelogDecision decision = relogGateDecide(relog_gate_, key, have_location,
+                                                   lat_e7, lon_e7, r.rssi, *relog_cfg_);
+    if (decision == RelogDecision::Suppress) {
+      state_.relog_suppressed++;
+      return;
+    }
+    relog_row = decision != RelogDecision::LogFirstSight;
+  }
+#endif
+
   const bool have_altitude =
       gps_ptr_->altitude.isValid() &&
       gps_ptr_->altitude.age() < config_.gps_field_max_age_ms;
@@ -669,6 +701,9 @@ void Logger::appendCsvRow(const QueuedScanResult& r) {
   state_.csv_dirty = true;
 
   state_.csv_rows++;
+  if (relog_row) {
+    state_.relog_rows++;
+  }
   if ((state_.csv_rows % 25) == 0) {
     log_file_.flush();
     if (log_file_.getWriteError()) {

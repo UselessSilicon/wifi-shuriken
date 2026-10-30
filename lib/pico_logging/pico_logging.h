@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "../log_format/log_format.h"
+#include "wifi_relog_gate.h"
 
 namespace pico_logging {
 
@@ -47,6 +48,8 @@ struct State {
   uint32_t csv_last_flush_ms = 0;
   uint32_t csv_rows = 0;
   uint32_t csv_rows_blank_gps = 0;
+  uint32_t relog_rows = 0;        // rows written because a repeat moved, got a fix, or got stronger
+  uint32_t relog_suppressed = 0;  // repeats the re-log gate kept off the SD card
   uint8_t boot_reset_reason_code = 0;
   char boot_reset_reason[24] = "";
   char csv_boot_timestamp[15] = "";
@@ -67,6 +70,10 @@ class Logger {
   // Pass &gps (hardware) normally; pass &gps_phone when falling back to the
   // phone-sourced fix. Must not be called with nullptr.
   void setGpsSource(TinyGPSPlus* gps);
+
+  // Attach the spatial re-log gate consulted by appendCsvRow. nullptr (the
+  // default) disables it and every row is written as before. Core0 only.
+  void setRelogGate(RelogGate* gate, const RelogGateConfig* cfg);
 
   void initUtcTimezone();
   void registerSdDateTimeCallback();
@@ -105,6 +112,8 @@ class Logger {
   SdFat& sd_;
   FsFile& log_file_;
   TinyGPSPlus* gps_ptr_;
+  RelogGate* relog_gate_ = nullptr;
+  const RelogGateConfig* relog_cfg_ = nullptr;
   HardwareSerial& gnss_uart_;
   Stream& serial_;
   const Config& config_;
