@@ -41,6 +41,7 @@ jobs:
           cp .pio/build/xiao_rp2350_controller/firmware.bin dist/sd-card-updates/controller.bin
           cp .pio/build/xiao_esp32c5_scanner/firmware.bin dist/sd-card-updates/scanner.bin
           cp docs/sd-card-updates.md dist/sd-card-updates/README.md
+          cd dist && sha256sum xiao_rp2350_controller.uf2 xiao_esp32c5_scanner-merged.bin sd-card-updates/controller.bin sd-card-updates/scanner.bin > SHA256SUMS.txt
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
