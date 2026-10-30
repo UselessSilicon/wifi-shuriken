@@ -54,8 +54,9 @@ All settings (build flags, defaults in `include/Configuration.h`):
 - `RELOG_GATE_TABLE_SIZE` (8192): gate hash slots; must be a power of two, at least twice the capacity and
   at most 65535. Sizes that break these rules fail the build.
 
-The version string is `0.2-relog1`. It also appears as `appRelease=0.2-relog1` in the first line of each
-CSV.
+The version string is `0.2-relog1`. It also appears in `appRelease=` in the first line of each CSV, followed
+by the board ID, and in the AppVersion column of `RESETLOG.CSV`. CSV files and `RESETLOG.CSV` rows need valid
+GNSS time, so neither changes until the device has had a fix.
 
 Both the controller and the scanners must be updated for the full effect. Mixed versions (new controller
 with old scanners, or the reverse) log exactly as before; this is verified by simulation tests, so a
@@ -99,8 +100,9 @@ write succeeds, so a failed scanner update keeps the old image.
    overwrite them.
 3. Bench first, not on a drive. Copy `controller.bin` and `scanner.bin` to the SD card root, power on with
    stable power, and wait for both to be renamed `controller.applied.bin` and `scanner.applied.bin`.
-   Then confirm the controller reports `0.2-relog1` in its USB serial status or boot output, and that the
-   controller's scanner OTA output shows success for every scanner.
+   The status LED is purple while scanners update, and each scanner takes about 30 seconds. The firmware
+   does not print its version over serial, so confirm the controller by the `relog=` and `relog_supp=`
+   counters on its status line, and the scanners by the OTA output (see below).
 4. Bench smoke test: a few minutes walking or idling with a GPS fix. Rows are written, `Queue drops` and
    `serial_drop` stay at 0, and a stationary period does not grow the log beyond a few rows per access
    point. Then park for 30 minutes under poor sky (garage or near tall buildings) and confirm rows do not
@@ -117,3 +119,16 @@ write succeeds, so a failed scanner update keeps the old image.
 The scanners do not report a firmware version over SPI. The protocol is deliberately unchanged, so that
 mixed versions stay safe. A scanner update is therefore confirmed by three things: the `scanner.applied.bin`
 rename, the controller's scanner OTA success output, and `relog` rising on a moving test.
+
+`scanner.bin` is renamed only when every scanner succeeds in the same run. Otherwise it stays on the card and
+the whole update repeats on every power-on. MTP is unavailable until that finishes, so a desktop may give up
+on the device until it is replugged.
+
+A scanner can fail at the very end of a transfer with `scanner OTA end rejected: SEQUENCE_MISMATCH`, and the
+same scanner can fail this way on repeated runs. A failed scanner keeps the image it was running. If the
+output shows every scanner has reached `scanner OTA complete` at least once, across runs, stop retrying:
+take the card out and rename `scanner.bin` to `scanner.applied.bin` on a computer, ejecting the card properly
+before removing it.
+
+USB serial output goes to only one reader, so another program with the port open (a dashboard, for example)
+can take lines. Close it before relying on the absence of a line.
