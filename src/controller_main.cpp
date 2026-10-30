@@ -90,7 +90,17 @@ static WiFiDedupeTable master_dedupe_table = {};
 
 #if RELOG_GATE_ENABLED
 // Spatial re-log gate consulted at SD write time. Owned and used by core0 only,
-// so it needs no locking.
+// so it needs no locking. Bad sizes would make its probe loop spin forever, so
+// they are rejected at compile time.
+static_assert((RELOG_GATE_TABLE_SIZE) > 0 &&
+                  ((RELOG_GATE_TABLE_SIZE) & ((RELOG_GATE_TABLE_SIZE) - 1)) == 0,
+              "RELOG_GATE_TABLE_SIZE must be a power of two (for example 4096 or 8192)");
+static_assert((RELOG_GATE_TABLE_SIZE) <= 0xFFFF,
+              "RELOG_GATE_TABLE_SIZE must be at most 65535 (use 32768 or less)");
+static_assert((RELOG_GATE_CAPACITY) > 0 && (RELOG_GATE_CAPACITY) < 0xFFFF,
+              "RELOG_GATE_CAPACITY must be between 1 and 65534");
+static_assert((RELOG_GATE_TABLE_SIZE) >= 2 * (RELOG_GATE_CAPACITY),
+              "RELOG_GATE_TABLE_SIZE must be at least twice RELOG_GATE_CAPACITY");
 static RelogGateEntry relog_gate_entries[RELOG_GATE_CAPACITY];
 static uint16_t relog_gate_slots[RELOG_GATE_TABLE_SIZE];
 static RelogGate relog_gate = {};
