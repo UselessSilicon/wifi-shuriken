@@ -9,12 +9,14 @@
 
 ## What's in this fork
 
-The firmware, hardware and case files are unchanged from upstream. This fork only adds an Android app
-and its documents.
+The hardware and case files are unchanged from upstream. The firmware is upstream plus one AI-written
+change, the spatial re-log (see the pointer below). This fork also adds an Android app and its documents.
 
 | Path | Origin | Contents |
 | --- | --- | --- |
-| `src/`, `include/`, `lib/`, `platformio.ini`, `scripts/`, `test/` | Upstream | Controller (XIAO RP2350) and scanner (XIAO ESP32-C5) firmware |
+| `src/`, `include/`, `lib/`, `platformio.ini`, `scripts/`, `test/` | Upstream, modified by the re-log change | Controller (XIAO RP2350) and scanner (XIAO ESP32-C5) firmware |
+| `lib/wifi_common/wifi_relog_gate.*`, the dedupe TTL change, `RELOG_*` settings | Fork only (AI-written) | Spatial re-log: logs an access point again after moving 25 m or a 6 dB signal gain |
+| `docs/spatial-relog.md` | Fork only (AI-written) | Re-log behaviour, size impact and the safe flash procedure |
 | `case_stl/` | Upstream | Case models |
 | `docs/sd-card-updates.md` | Upstream | SD card firmware update instructions |
 | `.github/workflows/build-firmware.yml` | Upstream | Firmware build (`firmware-artifacts`) |
@@ -22,6 +24,10 @@ and its documents.
 | `docs/superpowers/` | Fork only (AI-written) | The app's design and implementation plan |
 | `.github/workflows/android-companion.yml` | Fork only (AI-written) | App build and tests (`shuriken-companion-debug-apk`) |
 | `CLAUDE.md` | Fork only (AI-written) | Working rules for the AI assistant in this repository |
+
+**Spatial re-log:** this fork's firmware logs an access point more than once per drive (default 25 m or
+6 dB, on by default, `0.2-relog1`). See [docs/spatial-relog.md](docs/spatial-relog.md) for behaviour, how to
+turn it off, and the safe flash procedure.
 
 ---
 
