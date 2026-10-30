@@ -650,6 +650,23 @@ void test_relogGate_rssi_no_overflow() {
   TEST_ASSERT_TRUE(rgAt(f, 2, RG_BASE, RG_BASE, -122) == RelogDecision::LogStronger);
 }
 
+void test_relogGate_churn_keeps_slot_table_consistent() {
+  RgFixture f(4, 8);
+  for (uint8_t i = 0; i < 60; i++) {
+    TEST_ASSERT_TRUE(rgAt(f, i, RG_BASE, RG_BASE, -70) == RelogDecision::LogFirstSight);
+    // Checked every step so a leaked slot fails here instead of hanging a later probe.
+    uint16_t occupied = 0;
+    for (uint16_t s = 0; s < f.gate.table_size; s++) {
+      if (f.gate.slots[s] != RELOG_GATE_EMPTY_SLOT) occupied++;
+    }
+    TEST_ASSERT_EQUAL_UINT16(f.gate.count, occupied);
+  }
+  for (uint8_t i = 56; i < 60; i++) {
+    TEST_ASSERT_TRUE(rgAt(f, i, RG_BASE, RG_BASE, -70) == RelogDecision::Suppress);
+  }
+  TEST_ASSERT_TRUE(rgAt(f, 10, RG_BASE, RG_BASE, -70) == RelogDecision::LogFirstSight);
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -695,5 +712,6 @@ int main(int argc, char** argv) {
   RUN_TEST(test_relogGate_positionless_repeat_after_fix_suppressed);
   RUN_TEST(test_relogGate_antimeridian_wrap);
   RUN_TEST(test_relogGate_rssi_no_overflow);
+  RUN_TEST(test_relogGate_churn_keeps_slot_table_consistent);
   return UNITY_END();
 }
