@@ -3,6 +3,7 @@
 #include <unity.h>
 
 #include "wifi_dedupe.h"
+#include "wifi_relog_gate.h"
 #include "wifi_result_utils.h"
 
 void setUp() {}
@@ -506,6 +507,149 @@ void test_wifiDedupeHash_fields_matches_result() {
   TEST_ASSERT_TRUE(wifiDedupeHashEquals(from_result, from_fields));
 }
 
+// ---- Relog gate ----
+
+static constexpr int32_t RG_BASE = 10000000;  // synthetic 1.0 deg
+static const RelogGateConfig RG_CFG = {25, 6};
+
+struct RgFixture {
+  RelogGateEntry entries[8];
+  uint16_t slots[16];
+  RelogGate gate;
+  explicit RgFixture(uint16_t capacity = 8, uint16_t table_size = 16) {
+    relogGateInit(&gate, entries, capacity, slots, table_size);
+  }
+};
+
+static WiFiDedupeHash rgKey(uint8_t n) {
+  char ssid[33] = {};
+  const uint8_t bssid[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, n};
+  WiFiDedupeHash h;
+  wifiDedupeHashFromFields(ssid, bssid, 6, WIFI_BAND_24_GHZ, 0, h);
+  return h;
+}
+
+static RelogDecision rgAt(RgFixture& f, uint8_t n, int32_t lat, int32_t lon, int8_t rssi,
+                          const RelogGateConfig& cfg = RG_CFG) {
+  return relogGateDecide(&f.gate, rgKey(n), true, lat, lon, rssi, cfg);
+}
+
+static RelogDecision rgNoPos(RgFixture& f, uint8_t n, int8_t rssi,
+                             const RelogGateConfig& cfg = RG_CFG) {
+  return relogGateDecide(&f.gate, rgKey(n), false, 0, 0, rssi, cfg);
+}
+
+void test_relogGate_first_sight_logs() {
+  RgFixture f;
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, RG_BASE, -70) == RelogDecision::LogFirstSight);
+}
+
+void test_relogGate_same_spot_suppressed() {
+  RgFixture f;
+  rgAt(f, 1, RG_BASE, RG_BASE, -70);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, RG_BASE, -70) == RelogDecision::Suppress);
+}
+
+void test_relogGate_24m_suppressed_25m_logs() {
+  RgFixture f;
+  rgAt(f, 1, RG_BASE, RG_BASE, -70);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE + 2156, RG_BASE, -70) == RelogDecision::Suppress);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE + 2255, RG_BASE, -70) == RelogDecision::LogMoved);
+}
+
+void test_relogGate_rssi_plus5_suppressed_plus6_logs() {
+  RgFixture f;
+  rgAt(f, 1, RG_BASE, RG_BASE, -70);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, RG_BASE, -65) == RelogDecision::Suppress);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, RG_BASE, -64) == RelogDecision::LogStronger);
+}
+
+void test_relogGate_rssi_baseline_resets_after_distance_relog() {
+  RgFixture f;
+  rgAt(f, 1, RG_BASE, RG_BASE, -70);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE + 2695, RG_BASE, -60) == RelogDecision::LogMoved);  // ~30 m
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE + 2695, RG_BASE, -56) == RelogDecision::Suppress);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE + 2695, RG_BASE, -54) == RelogDecision::LogStronger);
+}
+
+void test_relogGate_no_fix_logs_once_then_suppresses() {
+  RgFixture f;
+  TEST_ASSERT_TRUE(rgNoPos(f, 1, -80) == RelogDecision::LogFirstSight);
+  TEST_ASSERT_TRUE(rgNoPos(f, 1, -80) == RelogDecision::Suppress);
+  TEST_ASSERT_TRUE(rgNoPos(f, 1, -60) == RelogDecision::Suppress);
+}
+
+void test_relogGate_fix_arrival_relogs_positionless_entry() {
+  RgFixture f;
+  rgNoPos(f, 1, -70);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, RG_BASE, -70) == RelogDecision::LogFixArrived);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, RG_BASE, -70) == RelogDecision::Suppress);
+}
+
+void test_relogGate_eviction_relogs_as_first_sight() {
+  RgFixture f(4, 8);
+  for (uint8_t i = 0; i < 5; i++) {
+    TEST_ASSERT_TRUE(rgAt(f, i, RG_BASE, RG_BASE, -70) == RelogDecision::LogFirstSight);
+  }
+  TEST_ASSERT_TRUE(rgAt(f, 0, RG_BASE, RG_BASE, -70) == RelogDecision::LogFirstSight);
+  TEST_ASSERT_TRUE(rgAt(f, 4, RG_BASE, RG_BASE, -70) == RelogDecision::Suppress);
+}
+
+void test_relogGate_zero_zero_disables() {
+  RgFixture f;
+  const RelogGateConfig off = {0, 0};
+  TEST_ASSERT_TRUE(rgNoPos(f, 1, -70, off) == RelogDecision::LogFirstSight);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, RG_BASE, -70, off) == RelogDecision::Suppress);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE + 89800, RG_BASE, -70, off) == RelogDecision::Suppress);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE + 89800, RG_BASE, -40, off) == RelogDecision::Suppress);
+}
+
+void test_relogGate_reset_clears() {
+  RgFixture f;
+  rgAt(f, 1, RG_BASE, RG_BASE, -70);
+  relogGateReset(&f.gate);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, RG_BASE, -70) == RelogDecision::LogFirstSight);
+}
+
+void test_relogGate_longitude_scaling_at_high_latitude() {
+  RgFixture f;
+  const int32_t lat = 700000000;  // synthetic 70.0 deg
+  rgAt(f, 1, lat, RG_BASE, -70);
+  TEST_ASSERT_TRUE(rgAt(f, 1, lat, RG_BASE + 6000, -70) == RelogDecision::Suppress);
+  TEST_ASSERT_TRUE(rgAt(f, 1, lat, RG_BASE + 6571, -70) == RelogDecision::LogMoved);
+}
+
+void test_relogGate_stationary_rssi_noise_bounded() {
+  RgFixture f;
+  int logs = 0;
+  for (int i = 0; i < 1000; i++) {
+    const int8_t rssi = (int8_t)(-80 + (i % 11));
+    if (rgAt(f, 1, RG_BASE, RG_BASE, rssi) != RelogDecision::Suppress) logs++;
+  }
+  TEST_ASSERT_TRUE(logs <= 3);
+}
+
+void test_relogGate_positionless_repeat_after_fix_suppressed() {
+  RgFixture f;
+  rgAt(f, 1, RG_BASE, RG_BASE, -70);
+  TEST_ASSERT_TRUE(rgNoPos(f, 1, -50) == RelogDecision::Suppress);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE + 2695, RG_BASE, -70) == RelogDecision::LogMoved);
+}
+
+void test_relogGate_antimeridian_wrap() {
+  RgFixture f;
+  rgAt(f, 1, RG_BASE, 1799999990, -70);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, -1799999990, -70) == RelogDecision::Suppress);
+}
+
+void test_relogGate_rssi_no_overflow() {
+  RgFixture f;
+  rgAt(f, 1, RG_BASE, RG_BASE, 125);
+  TEST_ASSERT_TRUE(rgAt(f, 1, RG_BASE, RG_BASE, 127) == RelogDecision::Suppress);
+  rgAt(f, 2, RG_BASE, RG_BASE, -128);
+  TEST_ASSERT_TRUE(rgAt(f, 2, RG_BASE, RG_BASE, -122) == RelogDecision::LogStronger);
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -536,5 +680,20 @@ int main(int argc, char** argv) {
   RUN_TEST(test_wifiDedupeTable_millis_wraparound);
   RUN_TEST(test_wifiDedupeTable_remember_without_time_never_expires);
   RUN_TEST(test_wifiDedupeHash_fields_matches_result);
+  RUN_TEST(test_relogGate_first_sight_logs);
+  RUN_TEST(test_relogGate_same_spot_suppressed);
+  RUN_TEST(test_relogGate_24m_suppressed_25m_logs);
+  RUN_TEST(test_relogGate_rssi_plus5_suppressed_plus6_logs);
+  RUN_TEST(test_relogGate_rssi_baseline_resets_after_distance_relog);
+  RUN_TEST(test_relogGate_no_fix_logs_once_then_suppresses);
+  RUN_TEST(test_relogGate_fix_arrival_relogs_positionless_entry);
+  RUN_TEST(test_relogGate_eviction_relogs_as_first_sight);
+  RUN_TEST(test_relogGate_zero_zero_disables);
+  RUN_TEST(test_relogGate_reset_clears);
+  RUN_TEST(test_relogGate_longitude_scaling_at_high_latitude);
+  RUN_TEST(test_relogGate_stationary_rssi_noise_bounded);
+  RUN_TEST(test_relogGate_positionless_repeat_after_fix_suppressed);
+  RUN_TEST(test_relogGate_antimeridian_wrap);
+  RUN_TEST(test_relogGate_rssi_no_overflow);
   return UNITY_END();
 }
