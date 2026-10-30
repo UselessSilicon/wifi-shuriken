@@ -23,6 +23,12 @@ since its last row. For each access point that reaches the SD write step:
 4. Signal is at least the gain threshold stronger than at the last logged row: log it.
 5. Otherwise: suppress it and count it.
 
+The distance threshold follows the GPS accuracy (the same HDOP x 5 m figure written in the AccuracyMeters
+column). Under a good fix it is 25 m. Under a poor fix it is at least twice the reported accuracy, so with
+25 m accuracy the device must move 50 m before a repeat is logged. This keeps a parked device with a
+wandering fix (poor sky, a coarse phone fix) from filling the card. When the accuracy is unknown the plain
+25 m applies. To ignore accuracy entirely, build with `-DRELOG_ACCURACY_FACTOR=0`.
+
 Without a GPS fix a network is logged once, as before. When a fix first arrives, networks that were logged
 without a position are logged once more with one. Expect roughly 3 to 6 times more rows per drive.
 
@@ -37,6 +43,16 @@ To turn it off, build with:
 ```
 
 CSV rows are then identical to before. Only the version string and two status-line counters differ.
+
+All settings (build flags, defaults in `include/Configuration.h`):
+
+- `RELOG_DISTANCE_M` (25): metres moved before a repeat is logged; 0 disables the distance rule.
+- `RELOG_RSSI_GAIN_DB` (6): dB stronger before a repeat is logged; 0 disables the signal rule.
+- `RELOG_ACCURACY_FACTOR` (2): the distance rule needs at least this many times the fix accuracy; 0 ignores
+  accuracy.
+- `RELOG_GATE_CAPACITY` (4000): access points tracked by the gate.
+- `RELOG_GATE_TABLE_SIZE` (8192): gate hash slots; must be a power of two, at least twice the capacity and
+  at most 65535. Sizes that break these rules fail the build.
 
 The version string is `0.2-relog1`. It also appears as `appRelease=0.2-relog1` in the first line of each
 CSV.
@@ -63,7 +79,7 @@ previous behaviour.
 
 | Target | RAM before | RAM after | Flash before | Flash after |
 | --- | --- | --- | --- | --- |
-| Controller | 130324 | 242908 | 188304 | 190712 |
+| Controller | 130324 | 242908 | 188304 | 190872 |
 | Scanner | 152156 | 168172 | 1031989 | 1032225 |
 
 All figures in bytes. The scanner RAM increase of 16016 bytes is the 4000-entry timestamp array added to its
@@ -87,7 +103,8 @@ write succeeds, so a failed scanner update keeps the old image.
    controller's scanner OTA output shows success for every scanner.
 4. Bench smoke test: a few minutes walking or idling with a GPS fix. Rows are written, `Queue drops` and
    `serial_drop` stay at 0, and a stationary period does not grow the log beyond a few rows per access
-   point.
+   point. Then park for 30 minutes under poor sky (garage or near tall buildings) and confirm rows do not
+   keep growing; `relog` should barely move.
 5. Optional test drive on a known route: rows per access point should be about 3 to 6 times higher than on
    the same route with the old firmware, `relog` rises, drops stay at 0, and the `blank_gps` share is
    unchanged.

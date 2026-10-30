@@ -265,3 +265,21 @@ Procedure the release must document (in the fork README section for this feature
    for each scanner).
 6. Mixed versions (new controller, old scanners or the reverse) must keep logging exactly as today; the
    implementation must be tested for that, so a partially applied update is never harmful.
+
+## 14. Amendment after final review (accuracy-scaled distance)
+
+Rule: when both the stored entry and the sighting have positions, the distance rule fires at
+`max(RELOG_DISTANCE_M, RELOG_ACCURACY_FACTOR x accuracy_m)`, where `accuracy_m` is HDOP x 5 m rounded to
+whole metres, taken from the same GPS fields and validity/age test as the AccuracyMeters column. Unknown
+accuracy (0) keeps the plain distance; `RELOG_ACCURACY_FACTOR=0` ignores accuracy. Default factor: 2. The
+rest of the decision order is unchanged.
+
+Why: the plain 25 m rule ignored fix quality. A parked device under poor sky or on a coarse phone fix can
+wander more than 25 m every minute, which would re-log every access point in view each time and reset its
+RSSI baseline, so the log would grow with time at one spot. That is the anti-goal of this design. Scaling
+the threshold by accuracy keeps 25 m under a good fix and requires a move well beyond the fix's own error
+under a poor one.
+
+The same review added compile-time checks on the gate sizes (table size a power of two, at least twice the
+capacity, at most 65535; capacity between 1 and 65534), since bad overrides would make the probe loop spin
+forever.
