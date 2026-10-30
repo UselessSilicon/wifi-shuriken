@@ -2,7 +2,7 @@
 
 // Firmware version used in CSV metadata fields.
 #ifndef APP_VERSION
-#define APP_VERSION "0.2"
+#define APP_VERSION "0.2-relog1"
 #endif
 #ifndef APP_RELEASE_VERSION
 #define APP_RELEASE_VERSION APP_VERSION
@@ -254,6 +254,29 @@
 #endif
 #ifndef CONTROLLER_DEDUPE_RESET_COOLDOWN_MS
 #define CONTROLLER_DEDUPE_RESET_COOLDOWN_MS 15000
+#endif
+
+// Spatial re-log: re-log an already-seen AP when the receiver moved this many meters (0 disables).
+#ifndef RELOG_DISTANCE_M
+#define RELOG_DISTANCE_M 25
+#endif
+// Spatial re-log: re-log an already-seen AP when its RSSI rose by this many dB (0 disables).
+#ifndef RELOG_RSSI_GAIN_DB
+#define RELOG_RSSI_GAIN_DB 6
+#endif
+// Spatial re-log: maximum number of APs tracked by the re-log gate.
+#ifndef RELOG_GATE_CAPACITY
+#define RELOG_GATE_CAPACITY 4000
+#endif
+// Spatial re-log: hash table slots for the re-log gate (keep larger than capacity).
+#ifndef RELOG_GATE_TABLE_SIZE
+#define RELOG_GATE_TABLE_SIZE 8192
+#endif
+// Spatial re-log is active when either trigger is enabled (derived, not overridable).
+#define RELOG_GATE_ENABLED ((RELOG_DISTANCE_M) > 0 || (RELOG_RSSI_GAIN_DB) > 0)
+// Controller dedupe entry lifetime in ms; 0 = never expire (upstream behaviour).
+#ifndef CONTROLLER_DEDUPE_TTL_MS
+#define CONTROLLER_DEDUPE_TTL_MS (RELOG_GATE_ENABLED ? 1000 : 0)
 #endif
 
 // SPI delay between command and follow-up polling frame in microseconds.

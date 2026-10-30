@@ -87,6 +87,7 @@ static uint8_t last_scan_band = 0;
 static uint8_t last_scan_channel = 0;
 static WiFiDedupeHash scan_dedupe_slots[WIFI_DEDUPE_TABLE_SIZE];
 static WiFiDedupeHash scan_dedupe_fifo[WIFI_DEDUPE_TABLE_CAPACITY];
+static uint32_t scan_dedupe_fifo_ms[WIFI_DEDUPE_TABLE_CAPACITY];
 static WiFiDedupeTable scan_dedupe_table = {};
 #if LOG_DEDUPE_HITS
 static uint32_t scan_dedupe_hits = 0;
@@ -404,7 +405,7 @@ static void process_scan_results_into_spi_buffer(int budget = SCAN_RESULT_PROCES
 
     WiFiDedupeHash hash = {};
     wifiDedupeHashFromResult(r, hash);
-    if (!wifiDedupeTableRemember(&scan_dedupe_table, &hash)) {
+    if (!wifiDedupeTableRememberAt(&scan_dedupe_table, &hash, millis())) {
 #if LOG_DEDUPE_HITS
       noteDedupeHit(raw_index, r);
 #endif
@@ -905,9 +906,10 @@ void setup() {
 
   memset(rx_buf, 0, FRAME_SIZE);
   memset(tx_buf, 0, FRAME_SIZE);
-  wifiDedupeTableInit(&scan_dedupe_table,
-                      scan_dedupe_slots, WIFI_DEDUPE_TABLE_SIZE,
-                      scan_dedupe_fifo, WIFI_DEDUPE_TABLE_CAPACITY);
+  wifiDedupeTableInitTtl(&scan_dedupe_table,
+                         scan_dedupe_slots, WIFI_DEDUPE_TABLE_SIZE,
+                         scan_dedupe_fifo, scan_dedupe_fifo_ms,
+                         WIFI_DEDUPE_TABLE_CAPACITY, SCANNER_DEDUPE_TTL_MS);
   resetDedupeAndBuffers();
 
   // Boot complete: scanner is ready/idle.

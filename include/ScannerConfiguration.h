@@ -58,3 +58,8 @@
 #ifndef SCANNER_OTA_DEBUG_SLOW_WRITE_MS
 #define SCANNER_OTA_DEBUG_SLOW_WRITE_MS 20
 #endif
+
+// Scanner dedupe entry lifetime in ms; 0 = never expire (upstream behaviour).
+#ifndef SCANNER_DEDUPE_TTL_MS
+#define SCANNER_DEDUPE_TTL_MS 1000
+#endif
