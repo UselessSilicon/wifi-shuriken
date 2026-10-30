@@ -667,6 +667,73 @@ void test_relogGate_churn_keeps_slot_table_consistent() {
   TEST_ASSERT_TRUE(rgAt(f, 10, RG_BASE, RG_BASE, -70) == RelogDecision::LogFirstSight);
 }
 
+// Synthetic drive: one AP heard every 500 ms for 20 s, moving 5 m north per
+// sample with RSSI rising 1 dB per sample. Scanner table, controller table,
+// then (optionally) the re-log gate. Returns the number of resulting rows.
+static uint32_t simulateDriveRows(uint32_t scanner_ttl, uint32_t controller_ttl, bool gate_on) {
+  WiFiDedupeHash s_slots[8] = {};
+  WiFiDedupeHash s_fifo[4] = {};
+  uint32_t s_ms[4] = {};
+  WiFiDedupeHash c_slots[8] = {};
+  WiFiDedupeHash c_fifo[4] = {};
+  uint32_t c_ms[4] = {};
+  WiFiDedupeTable scanner;
+  WiFiDedupeTable controller;
+  wifiDedupeTableInitTtl(&scanner, s_slots, 8, s_fifo, s_ms, 4, scanner_ttl);
+  wifiDedupeTableInitTtl(&controller, c_slots, 8, c_fifo, c_ms, 4, controller_ttl);
+  RelogGateEntry g_entries[4] = {};
+  uint16_t g_slots[8];
+  RelogGate gate;
+  relogGateInit(&gate, g_entries, 4, g_slots, 8);
+  const RelogGateConfig cfg = {25, 6};
+
+  const uint8_t bssid[6] = {0x00, 0x00, 0x5E, 0x00, 0x53, 0x01};
+  WiFiDedupeHash key;
+  wifiDedupeHashFromFields("", bssid, 6, 0, 0x0431, key);
+
+  uint32_t rows = 0;
+  for (uint32_t i = 0; i < 40; i++) {
+    const uint32_t now = i * 500;
+    // 5 m north is about 449 units of 1e-7 degree.
+    const int32_t lat_e7 = 10000000 + (int32_t)(i * 449);
+    const int32_t lon_e7 = 10000000;
+    const int8_t rssi = (int8_t)(-85 + (int)i);
+    if (!wifiDedupeTableRememberAt(&scanner, &key, now)) continue;
+    if (!wifiDedupeTableRememberAt(&controller, &key, now)) continue;
+    if (gate_on) {
+      if (relogGateDecide(&gate, key, true, lat_e7, lon_e7, rssi, cfg) ==
+          RelogDecision::Suppress) {
+        continue;
+      }
+    }
+    rows++;
+  }
+  return rows;
+}
+
+void test_relogPipeline_today_one_row() {
+  TEST_ASSERT_EQUAL_UINT32(1, simulateDriveRows(0, 0, false));
+}
+
+void test_relogPipeline_new_controller_old_scanner() {
+  TEST_ASSERT_EQUAL_UINT32(1, simulateDriveRows(0, 1000, true));
+}
+
+void test_relogPipeline_old_controller_new_scanner() {
+  TEST_ASSERT_EQUAL_UINT32(1, simulateDriveRows(1000, 0, false));
+}
+
+void test_relogPipeline_disabled_build_matches_today() {
+  // 0/0 build: controller TTL 0, gate compiled out.
+  TEST_ASSERT_EQUAL_UINT32(1, simulateDriveRows(1000, 0, false));
+}
+
+void test_relogPipeline_both_new_relogs() {
+  const uint32_t rows = simulateDriveRows(1000, 1000, true);
+  TEST_ASSERT_GREATER_OR_EQUAL_UINT32(3, rows);
+  TEST_ASSERT_LESS_OR_EQUAL_UINT32(40, rows);
+}
+
 int main(int argc, char** argv) {
   (void)argc;
   (void)argv;
@@ -713,5 +780,10 @@ int main(int argc, char** argv) {
   RUN_TEST(test_relogGate_antimeridian_wrap);
   RUN_TEST(test_relogGate_rssi_no_overflow);
   RUN_TEST(test_relogGate_churn_keeps_slot_table_consistent);
+  RUN_TEST(test_relogPipeline_today_one_row);
+  RUN_TEST(test_relogPipeline_new_controller_old_scanner);
+  RUN_TEST(test_relogPipeline_old_controller_new_scanner);
+  RUN_TEST(test_relogPipeline_disabled_build_matches_today);
+  RUN_TEST(test_relogPipeline_both_new_relogs);
   return UNITY_END();
 }
